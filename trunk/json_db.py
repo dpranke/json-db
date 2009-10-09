@@ -66,7 +66,7 @@ class Database(object):
   """Implements a simple representation of a set of tables.
 
   A Database is represented as a dictionary with optional 'kind', 
-  'version', 'name', 'comments' fields. In addition, there is
+  'version', 'name', 'comment' fields. In addition, there is
   an optional 'databases' field that contains a dictionary of tables - 
   the keys are table names and the the values are the tables themselves."""
   
@@ -134,7 +134,7 @@ class Database(object):
       indent = len(keys[i]) + 8 
       s +=  '"' + keys[i] + '": ' + t._dumps(include_data, pretty, indent)
       if i < len(keys)-1:
-        s += ',' + p
+        s += ',' + p + "  "
     s += '}}'
     return s
 
@@ -301,7 +301,7 @@ class Table(object):
     if self.__name:
       s = s + '"name": ' + json.dumps(self.__name) + "," + p
     if self.__comment:
-      s = s + '"comments": ' + json.dumps(self.__comment) + "," + p
+      s = s + '"comment": ' + json.dumps(self.__comment) + "," + p
     s = s + '"version": ' + json.dumps(self.__version) + "," + p
     s = s + '"columns": ' + json.dumps(self.__columns) + "," + p
     if self.__primary_key:
@@ -901,6 +901,7 @@ class CLI(object):
     if self.options.debug:
       pdb.set_trace()
 
+    d = Database()
     if self.args:
       while self.args:
         arg = self.args.pop(0)
@@ -917,7 +918,6 @@ class CLI(object):
           if self.options.extract or self.options.database:
             d = Database(f)
           else:
-            d = Database()
             t = Table(f)
             if t.name():
               d[t.name()] = t
