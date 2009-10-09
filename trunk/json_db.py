@@ -507,9 +507,8 @@ class Table(object):
     for r in self.__rows:
       i = 0
       per_values = []
-      while i < len(r):
-        if mask[i]:
-          per_values.append(r[i])
+      while i < len(per_lower_columns):
+        per_values.append(r[self.__column_indices[per_lower_columns[i]]])
         i = i + 1
       per_key = tuple(per_values)
       if agg.has_key(per_key):

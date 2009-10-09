@@ -350,18 +350,28 @@ class TableTests(unittest.TestCase):
                      self.tableSix())
  
   def testSummarize(self):
-    t1 = Table({"columns" : ["a", "b"],
-                "rows":    [[ 1 ,  2 ],
-                            [ 1 ,  4 ],
-                            [ 2 ,  2 ],
-                            [ 2 ,  4 ],
-                            [ 2 ,  5 ],
+    t1 = Table({"columns" : ["a", "b", "c"],
+                "rows":    [[ 1 ,  2, 10 ],
+                            [ 1 ,  4, 5 ],
+                            [ 2 ,  2, 8 ],
+                            [ 2 ,  4, 6 ],
+                            [ 2 ,  5, 5 ],
+                            [ 2 ,  5, 6 ],
                            ]});
 
     self.assertEqual(t1.summarize(["a"]),
                      Table({"columns": ["a", "count"],
                             "rows" :  [[1, 2],
-                                       [2, 3]]}))
+                                       [2, 4]]}))
+
+    self.assertEqual(t1.summarize(["b", "a"]),
+                     Table({"columns": ["b", "a", "count"],
+                            "rows" :  [[2, 1, 1],
+                                       [4, 1, 1],
+                                       [2, 2, 1],
+                                       [4, 2, 1],
+                                       [5, 2, 2]
+                                      ]}))
 
     self.assertEqual(t1.summarize(["a"], 
         lambda row: Row({"max_b": max(row.b), "min_b": min(row.b)})),
