@@ -191,12 +191,13 @@ class Table(object):
     return _TableIter(self)      
 
   def __eq__(self, other):
-    return isinstance(other, Table) and \
-           self.__columns == other.__columns and \
-           self.__rows    == other.__rows    and \
-           self.__version == other.__version and \
-           self.__primary_key == other.__primary_key and \
-           self.__name == other.__name
+    if (isinstance(other, Table) and self.__columns == other.__columns and 
+        len(self.__rows) == len(other.__rows)):
+      for r in self.__rows:
+        if not r in other.__rows:
+          return False
+      return True
+    return False
 
   def name(self):
     """Returns the name of the table, if it has one."""
@@ -232,7 +233,7 @@ class Table(object):
 
   def rowAsList(self, id):
     """Returns the specified row as a list (not a Row)."""
-    return self.row(id).toList()
+    return self.row(id).values()
 
   def rename(self, d):
     """Returns a new Table with the columns renamed."""
@@ -419,76 +420,103 @@ class Table(object):
         new_rows.append(r)
     return Table({"columns": self.__columns, "rows": new_rows})
 
-  def extend(self, columns, fn):
-    """Returns a new table with new column name(s) listed in |columns| and 
-    each row extended to represent the value(s) returned by |fn|. Note
-    that columns must be a list, and fn must return a list, even if each
-    only wish to extend the table with a single column."""
-
-    new_col_names = self.__columns[:]
-    new_col_names.extend(columns)
+  def extend(self, fn):
+    """Returns a new table with new column name(s) listed by the keys in
+    |dict| and each row extended to represent the values returned by the
+    values in |dict|.""" 
+    ext_col_names = None
     new_rows = []
     for r in self.__rows:
-      new_cols = fn(Row(self.__columns, r))
+      row = Row(self.__columns, r)
       new_row = r[:]
-      new_row.extend(new_cols)
-      new_rows.append(new_row)
-    return Table({"columns": new_col_names, "rows": new_rows})
+      ext_row = fn(row)
+      if not ext_col_names:
+        ext_col_names = ext_row.columns()[:]
+      new_rows.append(new_row + ext_row.values())
+    return Table({"columns": self.__columns + ext_col_names, "rows": new_rows})
 
-  def summarize(self, columns, fns = []):
-    """Returns a new table with one row for each unique value of the columns
-    specified in columns, and with fns applied to each column in the remaining
-    rows."""
-    running_lists = {}
-    new_columns = [c.strip() for c in columns]
-    new_lower_columns = [c.lower() for c in columns]
+  def summarize(self, per_column_names, add_fn=None):
+    """Returns a new table summarized over the list of columns in 
+    |per_column_names|, extended to any new columns returned by |add_fn|. 
+    |add_fn| is a function that takes a Row as input and returns a Row
+    as output - the output Row containing just the new columns to add.
 
+    If |add_fn| is none, we summarize and extend with a single column called
+    "count" that has as a value the # of times each row appeared.
+    
+    Examples:
+    
+      t = Table({"columns": ["a", "b", "c", "d"],
+                 "rows":   [[1, 2, 3, 4],
+                            [1, 3, 3, 5],
+                            [1, 2, 4, 5]]})
+      t = t.summarize(["a", "b"])
+      //t == Table({"columns": ["a", "b", "count"],
+                    "rows" :  [[1, 2, 2],
+                               [1, 3, 1]]})
+
+      t = t.summarize(["a", "b"],
+        lambda row : Row({"max_c": max(row.c), "min_d" :  min(row.d)}))
+      //t == Table({"columns": ["a", "b", "max_c", "min_d"],
+      //            "rows":   [[1, 2, 4, 4],
+      //                       [1, 3, 3, 5]]})
+    """
+
+    per_columns = [c.strip() for c in per_column_names]
+    per_lower_columns = [c.lower() for c in per_columns]
+
+    mask = []
+    for c in self.__columns:
+      mask.append(c.lower() in per_lower_columns)
+
+    # first, summarize into the agg dictionary
+    agg = {}
     for r in self.__rows:
-      row = []
-      values = []
       i = 0
-      for c in self.__columns:
-        if c.lower() in new_lower_columns:
-          row.append(r[i])
-        else:
-          values.append(r[i])
-        i = i+1
-      s = json.dumps(row)
-      if running_lists.has_key(s):
-        i = 0
-        for l in running_lists[s]['lists']:
-          l.append(values[i])
-          i = i + 1
-      else:
-        running_lists[s] = {}
-        running_lists[s]['row'] = row
-        running_lists[s]['lists'] = [[v] for v in values]
-
-    new_rows = []
-    for key, value in running_lists.iteritems():
-      new_row = []
-      row = value['row']
-      lists = value['lists']
-      i = 0
-      j = 0
-      for c in self.__columns:
-        if c in columns:
-          new_row.append(row[j])
-          j = j + 1
-        elif i < len(fns):
-          new_row.append(fns[i](lists[i]))
-          i = i + 1
-        else:
-          new_row.append(lists[i])
-          i = i + 1
-
-      new_rows.append(new_row)
-      i = 0
-      while len(new_rows[0]) > len(new_columns):
-        new_columns.append("s" + str(i))
+      per_values = []
+      while i < len(r):
+        if mask[i]:
+          per_values.append(r[i])
         i = i + 1
+      per_key = tuple(per_values)
+      if agg.has_key(per_key):
+        if add_fn:
+          i = 0
+          while i < len(r):
+            if not mask[i]:
+              agg[per_key][i].append(r[i])
+            i = i + 1
+        else:
+          agg[per_key] = agg[per_key] + 1
+      else:
+        if add_fn:
+          agg[per_key] = []
+          i = 0
+          while i < len(r):
+            if mask[i]:
+              agg[per_key].append(r[i])
+            else:
+              agg[per_key].append([r[i]])
+            i = i + 1
+        else:
+          agg[per_key] = 1
 
-    return Table({"columns":new_columns, "rows":new_rows})
+    # now, compute the new aggregates
+    new_rows = []
+    add_column_names = None
+    for key, values in agg.iteritems():
+      if add_fn:
+        add_row = add_fn(Row(self.columns(), values))
+        if not add_column_names:
+          add_column_names = add_row.columns()
+        new_rows.append(list(key) + add_row.values())
+      else:
+        if not add_column_names:
+          add_column_names = ["count"]
+        new_rows.append(list(key) + [values])
+
+    return Table({"columns": per_columns + add_column_names, 
+                  "rows": new_rows})
  
   def orderBy(self, columns):
     """Returns a copy of the table ordered by the list of columns as
@@ -521,6 +549,13 @@ class Table(object):
 
     r.__rows.sort(fn)
     return r
+
+
+  def limit(self, n):
+    """Returns a new Table containg only the first n rows of self."""
+    return Table({"name": self.name(), 
+                 "columns": self.columns(), 
+                 "rows": self.rows()[0:n]})
 
 class _TableIter(object):
   __table = None
@@ -570,6 +605,9 @@ class Row(object):
   def __str__(self):
     return str(self.toDict())
 
+  def __repr__(self):
+    return repr(self.toDict())
+
   def __eq__(self, other):
     return self.toDict() == other.toDict()
 
@@ -600,13 +638,13 @@ class Row(object):
         self.__dict[self.__columns[i]] = self.__values[i]
     return self.__dict
 
-  def toList(self):
-    """Returns a Row as a list (losing the column names)."""
-    return self.__values
-
   def columns(self):
     """Returns the (case-preserved) list of column names for the Row."""
     return self.__columns
+
+  def values(self):
+    """Returns the list of values in the Row."""
+    return self.__values
 
 class _RowIter(object):
   """iterator object for a Row."""
@@ -632,40 +670,46 @@ class CLI(object):
 
   def add_params(self, parser):
     """Adds common command line options to an optparser object."""
-    parser.add_option("-c", "--csv", action="store_true", dest="csv", 
-                      default=False, help="output as CSV")
+    parser.add_option("-c", "--count", action="store_true", dest="count",
+                      default=False, help="print # of rows in table")
+    parser.add_option("-d", "--distinct", action="store_true", dest="distinct",
+                      default=False, 
+                      help="ensure output contains only distinct rows")
     parser.add_option("-C", "--input-csv", action="store_true", 
                       dest="input_csv", default=False, 
                       help="input file(s) are CSV")
-    parser.add_option("-e", "--extend", action="store", dest="extend",
-                      help="function that returns additional columns per row.")
-    parser.add_option("-E", "--extend-names", action="store", 
-                      dest="extend_names",
-                      help="names for additional columns in extend.")
+    parser.add_option("-e", "--extend", action="store", 
+                      dest="extend", help="function to extend the table by.")
     parser.add_option("-j", "--json", action="store_true", dest="json", 
                       default=True, help="output as JSON")
     parser.add_option("-J", "--input-json", action="store_true", 
                       dest="input_json", default=False, 
                       help="input file(s) are JSON")
+    parser.add_option("-l", "--limit", action="store", dest="limit",
+                      help="limit to the specified number of rows")
     parser.add_option("-n", "--no-execute", action="store_true", 
                       dest="no_execute", default=False, 
                       help="show commands but don't execute them")
-    parser.add_option("-s", "--select", action="store", dest="select",
-                      help="list of columns to select." )
+    parser.add_option("-o", "--order-by", action="store", dest="order_by",
+                      default=False, help="specify the sort order")
+    parser.add_option("-p", "--project", action="store", dest="project",
+                      help="list of columns to project." )
+    parser.add_option("-s", "--summarize-per", action="store", 
+                      dest="summarize_per", help="columns to summarize over" )
+    parser.add_option("-S", "--summarize-add", action="store", 
+                      dest="summarize_add",
+                      help="function to add additional columns to the summary" )
     parser.add_option("-v", "--verbose", action="store_true", 
                       dest="verbose", default=False, 
                       help="print commands along with executing them")
-    parser.add_option("-w", "--where", action="store", dest="where",
-                      help="WHERE lambda to filter rows by")
+    parser.add_option("-r", "--restrict", action="store", dest="restrict",
+                      help="function to filter rows by")
+    parser.add_option("", "--csv", action="store_true", dest="csv", 
+                      default=False, help="output as CSV")
     parser.add_option("", "--comment", action="store", dest="comment",
                       default=False, help="add a comment to the table")
-    parser.add_option("", "--count", action="store_true", dest="count",
-                      default=False, help="print # of rows in table")
     parser.add_option("", "--debug", action="store_true", dest="debug",
                       default=False, help="start in the debugger")
-    parser.add_option("", "--distinct", action="store_true", dest="distinct",
-                      default=False, 
-                      help="ensure output contains only distinct rows")
     parser.add_option("", "--input-column-names", action="store", 
                       dest="input_column_names", default=None, 
                       help="specify column names for the input table")
@@ -674,8 +718,6 @@ class CLI(object):
                       help="input data has column names")
     parser.add_option("", "--name", action="store", dest="name",
                       default=False, help="add a name to the table")
-    parser.add_option("", "--order-by", action="store", dest="order_by",
-                      default=False, help="specify the sort order")
 
   def opt_parse(self, parser):
     """Parse the command line."""
@@ -690,7 +732,7 @@ class CLI(object):
       for arg in self.args:
         fname = '<file:"' + arg + '">'
         if self.options.no_execute or self.options.verbose:
-          print >>sys.stderr, "tables[" + arg + "] = Table(" + fname + ")" 
+          print >>sys.stderr, "t = Table(" + fname + ")" 
         if not self.options.no_execute:
           f = open(arg)
           t = Table(f)
@@ -719,26 +761,26 @@ class CLI(object):
     if thunk:
       t = thunk(tables, self.options, self.args)
 
-    if self.options.where:
+    if self.options.restrict:
       if self.options.no_execute or self.options.verbose:
-        print >>sys.stderr, "t = t.restrict(" + self.options.where + ")"
+        print >>sys.stderr, "t = t.restrict(" + self.options.restrict + ")"
       if not self.options.no_execute:
-        lambda_fn = eval(self.options.where)
+        lambda_fn = eval(self.options.restrict)
         t = t.restrict(lambda_fn)
+
+    if self.options.project:
+      project = self.options.project.split(',')
+      if self.options.no_execute or self.options.verbose:
+        print >>sys.stderr, "t = t.project(" + str(project) + ")"
+      if not self.options.no_execute:
+        t = t.project(project)
 
     if self.options.extend:
       if self.options.no_execute or self.options.verbose:
-        print >>sys.stderr, "t = t.extend([" + self.options.extend_names + \
-            "], " + self.options.extend + ")"
+        print >>sys.stderr, "t = t.extend([" + self.options.extend + ")"
       if not self.options.no_execute:
-        new_cols = self.options.extend_names.split(',')
         lambda_fn = eval(self.options.extend)
-
-    if self.options.select:
-      if self.options.no_execute or self.options.verbose:
-        print >>sys.stderr, "t = t.project(" + self.options.select + ")"
-      if not self.options.no_execute:
-        t = t.project(self.options.select.split(','))
+        t = t.extend(lambda_fn)
 
     if self.options.distinct:
       if self.options.no_execute or self.options.verbose:
@@ -746,18 +788,41 @@ class CLI(object):
       if not self.options.no_execute:
         t = t.distinct()
 
+    if self.options.summarize_per:
+      summarize_per = self.options.summarize_per.split(",")
+      if self.options.no_execute or self.options.verbose:
+        if self.options.summarize_add:
+          astr = ", " + self.options.summarize_add
+        else:
+          astr = ""
+        print >>sys.stderr, "t = t.summarize(" + str(summarize_per) + "]" + \
+            astr + ")"
+      if not self.options.no_execute:
+        if self.options.summarize_add:
+          summarize_add = eval(self.options.summarize_add)
+          t = t.summarize(summarize_per, summarize_add)
+        else:
+          t = t.summarize(summarize_per)
+
+    if self.options.order_by:
+      order_by = self.options.order_by.split(',')
+      if self.options.no_execute or self.options.verbose:
+        print >>sys.stderr, "t = t.order_by(" + str(order_by) + ")"
+      if not self.options.no_execute:
+        t = t.orderBy(order_by) 
+
+    if self.options.limit:
+      if self.options.no_execute or self.options.verbose:
+        print >>sys.stderr, "t = t.limit(" + self.options.limit + ")"
+      if not self.options.no_execute:
+        t = t.limit(int(self.options.limit)) 
+
     if self.options.count:
       if self.options.no_execute or self.options.verbose:
         print >>sys.stderr, \
             "t = Table({'columns':['count'], 'rows':[[len(t)]]})"
       if not self.options.no_execute:
         t = Table({'columns':['count'], 'rows':[[len(t)]]})
-
-    if self.options.order_by:
-      if self.options.no_execute or self.options.verbose:
-        print >>sys.stderr, "t = t.order_by(" + self.options.order_by + ")"
-      if not self.options.no_execute:
-        t = t.orderBy(self.options.order_by.split(',')) 
 
     if not self.options.no_execute:
       if self.options.name and self.options.comment:

@@ -179,11 +179,11 @@ class BasicTableTests(unittest.TestCase):
                             "columns": ["a", "b"]}))
 
   def testExtend(self):
-    self.assertEqual(self.tableOne().extend(["c", "d"], 
-                     lambda x: [int(x.a) + int(x.b), int(x.a) - int(x.b)]),
-                     Table({"columns": ["a", "b", "c", "d"],
-                            "rows":   [[1, 2, 3, -1],
-                                       [3, 4, 7, -1]]}))
+    self.assertEqual(self.tableOne().extend( 
+        lambda x: Row({"c": int(x.a) + int(x.b), "d": int(x.a) - int(x.b)})),
+        Table({"columns": ["a", "b", "c", "d"],
+               "rows":   [[1, 2, 3, -1],
+                          [3, 4, 7, -1]]}))
 
   def test__GetItem__(self):
     self.assertEqual(self.tableOne()[1], Row({"a": 1, "b": 2}))
@@ -310,10 +310,15 @@ class BasicTableTests(unittest.TestCase):
                            ]});
 
     self.assertEqual(t1.summarize(["a"]),
-                     Table({"columns" : ["a", "s0"],
-                            "rows":    [[ 1 , [ 2, 4 ]],
-                                        [ 2 , [ 2, 4, 5]],
-                                       ]}));
+                     Table({"columns": ["a", "count"],
+                            "rows" :  [[1, 2],
+                                       [2, 3]]}))
+
+    self.assertEqual(t1.summarize(["a"], 
+        lambda row: Row({"max_b": max(row.b), "min_b": min(row.b)})),
+        Table({"columns": ["a", "max_b", "min_b"],
+               "rows":   [[ 1 , 4, 2],
+                          [ 2 , 5, 2]]}));
 
   def testDistinct(self):
     t1 = Table({"columns" : ["a", "b"],
