@@ -1,3 +1,5 @@
+PYTHON = python2.5
+COVERAGE= coverage
 SRCS := *.py
 OBJS := $(patsubst %.py,%.pyc,$(SRCS))
 TEST_SRCS := $(wildcard *test.py)
@@ -9,20 +11,20 @@ all : test
 test : $(TESTS)
 
 %_test.pyc : %_test.py %.py
-	python $(patsubst %.pyc,%.py,$@)
+	$(PYTHON) $(patsubst %.pyc,%.py,$@)
 	@touch $@
 
 %.pyc : %.py
-	python $<
+	$(PYTHON) $<
 
 .cover.%.py : %.py
-	coverage -p -e -x $<
+	$(COVERAGE) -p -e -x $<
 	@touch .cover.$<
 
 cover : .coverage
-	coverage -c
-	coverage -r -m $(SRCS)
-	coverage -a $(SRCS) 
+	$(COVERAGE) -c
+	$(COVERAGE) -r -m $(SRCS)
+	$(COVERAGE) -a $(SRCS) 
 
 .coverage : $(COVERS)
 	touch .coverage

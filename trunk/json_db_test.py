@@ -5,7 +5,46 @@ from json_db import *
 
 import unittest
 
-class BasicTableTests(unittest.TestCase):
+class MockStream(object):
+  def __init__(self, input = None):
+    self.writes = []
+    self.input = input
+    self.index = 0
+
+  def next(self):
+    if not self.input or i > len(self.input):
+      raise IndexError
+    s = self.input[i]
+    i = i + 1
+    return s
+
+  def write(self, str):
+    self.writes.append(str)
+
+  def getWrites(self):
+    return self.writes
+
+class defTests(unittest.TestCase):
+  def testTableFromCSV(self):
+    t = TableFromCSV(["a,b","1,2"], True)
+    self.assertEqual(t, Table({"columns":["a","b"],"rows":[["1","2"]]}))
+
+  def testTableToCSV(self):
+    t = Table({"columns":["a","b"],"rows":[["1","2"]]})
+    stdout = MockStream()
+    TableToCSV(stdout, t)
+    self.assertEqual(stdout.getWrites(), ['a,b\r\n','1,2\r\n'])
+
+class CLITests(unittest.TestCase):
+  def testMain(self):
+    stdin = MockStream()
+    stdout = MockStream()
+    stderr = MockStream()
+    Main(None, False, ["test.jsondb"], stdin, stdout, stderr)
+    Main(None, False, ["-n", "test.jsondb"], stdin, stdout, stderr)
+    Main(None, False, ["--verbose", "test.jsondb"], stdin, stdout, stderr)
+
+class TableTests(unittest.TestCase):
   """Do some basic testing for json_db."""
   def tableOne(self):
     return Table({"rows": [[1, 2], [3, 4]], 
@@ -52,20 +91,21 @@ class BasicTableTests(unittest.TestCase):
 
 
   def jsonOne(self):
-     return '{"primary key": "a", "rows": [[1, 2], [3, 4]], "version": 1, "columns": ["a", "b"]}'
+     return '{"primary key": "a", "rows": [[1, 2], [3, 4]], "kind": "table", "version": 1, "columns": ["a", "b"]}'
 
   def jsonTwo(self):
-    return '{"rows": [[1, 2], [3, 4]], "version": 1, "columns": ["c0", "c1"]}'
+    return '{"rows": [[1, 2], [3, 4]], "kind": "table", "version": 1, "columns": ["c0", "c1"]}'
 
   def jsonEmp(self):
     return '{"primary key": "empno", "rows": [[1], [2], [3]], "version": 1, "columns": ["empno"], "name": "emp"}'
              
   def testConstructors(self):
-    self.assertEqual(str(self.tableOne()), """{ "version": 1,
+    self.assertEqual(str(self.tableOne()), """{ "kind": "table",
+  "version": 1,
   "columns": ["a", "b"],
+  "primary key": "a",
   "rows":   [[1, 2],
-             [3, 4]],
-  "primary key": "a"}""")
+             [3, 4]]}""")
     self.assertEqual(repr(Table({"rows": [[1, 2], [3, 4]]})), self.jsonTwo())
     self.assertEqual(Table({"rows": [[1,2],[3,4]], "version": 1}),
                      Table({"rows": [[1,2],[3,4]]}))
@@ -177,6 +217,15 @@ class BasicTableTests(unittest.TestCase):
                      Table({"primary key": "a", 
                             "rows": [[1, 2]], 
                             "columns": ["a", "b"]}))
+
+  def testUpdate(self):
+    def fn(r):
+      r.b = int(r.a) * 3
+      return r
+
+    self.assertEqual(self.tableOne().update(fn), 
+                     Table({"columns": ["a", "b"],
+                            "rows": [[1, 3], [3, 9]]}))
 
   def testExtend(self):
     self.assertEqual(self.tableOne().extend( 
@@ -327,7 +376,7 @@ class BasicTableTests(unittest.TestCase):
                      Table({"columns": ["a", "b"],
                             "rows": [[1,1], [1,2], [2,3]]}))
 
-class BasicRowTests(unittest.TestCase):
+class RowTests(unittest.TestCase):
 
   def testStr(self):
     self.assertEqual(str(Row({"a":1})), "{'a': 1}")
@@ -336,7 +385,7 @@ class BasicRowTests(unittest.TestCase):
     self.assertEqual(Row({"a":1})['a'], 1)
     self.assertEqual(Row({"a":1})[0], 1)
 
-  def testGetcolumns(self):
+  def testGetColumns(self):
     self.assertEqual(Row({"a":1}).columns(), ["a"])
 
 if __name__ == '__main__':
