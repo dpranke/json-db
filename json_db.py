@@ -12,6 +12,7 @@ import sys
 import types
 
 CURRENT_TABLE_VERSION = 1
+CURRENT_DATABASE_VERSION = 1
 
 def TableFromCSV(stream, has_headings=False, headings=None):
   """Returns the table corresponding to the given CSV object.
@@ -60,6 +61,110 @@ class StringWriter(object):
 
   def __str__():
     return self.newline.join(self.lines)
+    
+class Database(object):
+  """Implements a simple representation of a set of tables.
+
+  A Database is represented as a dictionary with optional 'kind', 
+  'version', 'name', 'comments' fields. In addition, there is
+  an optional 'databases' field that contains a dictionary of tables - 
+  the keys are table names and the the values are the tables themselves."""
+  
+  def __init__(self, obj=None):
+    """Initialize the Database from the given input. There are four possible
+    choices:
+
+    * obj can be a native Python dictionary that mirrors the JSON structure.
+    * obj can be a JSON string representation of the Database.
+    * obj can be a file handle whose contents are a JSON string representation
+      of the Database.
+    * obj can be None, in which case an empty database is returned."""
+    self.__name = None
+    self.__comment = None
+    self.__version = CURRENT_DATABASE_VERSION
+    self.__kind = 'database'
+    self.__tables = {}
+    if not obj:
+      return
+
+    if type(obj) == types.StringType or type(obj) == types.UnicodeType:
+      return self.__init__(json.loads(obj))
+    elif type(obj) == types.FileType:
+      return self.__init__(json.load(obj))
+    elif type(obj) != types.DictType:
+      raise ValueError
+
+    if obj.has_key('name'):
+      self.__name = obj['name']
+    if obj.has_key('comment'):
+      self.__comment = obj['comment']
+    if obj.has_key('version'):
+      self.__version = obj['version']
+    if obj.has_key('tables'):
+      for t in obj['tables']:
+        self[t] = Table(obj['tables'][t])
+
+  def __str__(self):
+    return self.dumps(True);
+
+  def dumps(self, include_data=True):
+    """Returns a compact version of the database as a JSON string."""
+    s =  '{ "version": ' + str(self.__version) + ','
+    s += '"kind": "' + self.__kind + '",'
+    
+    if self.__name:
+      s += '"name": "' + self.__name + '",'
+    if self.__comment:
+      s += '"comment": "' + self.__comment + '",'
+    s += '"tables": {'
+    keys = self.__tables.keys()
+    for i in range(len(keys)):
+      t = self.__tables[keys[i]]
+      s +=  '"' + keys[i] + '": ' + t._dumps(include_data)
+      if i < len(keys)-1:
+        s += ','
+    s += '}}'
+    return s
+
+  def describe(self):
+    """Returns a JSON description of the database minus the rows."""
+    self._dumps(False)
+    
+  def __repr__(self):
+    """Returns a compact version of the database as a JSON string."""
+    return self._dumps(True)
+
+  def __eq__(self, other):
+    """Databases are equal if they contain the same databases."""
+    if self.__tables.keys() != other.__tables.keys():
+      return False
+    for k in self.__tables.keys():
+      if self.__tables[k] != other.__tables[k]:
+        return False
+    return True
+
+  def __getitem__(self, name):
+    return self.__tables[name]
+
+  def __setitem__(self, name, val):
+    self.__tables[name] = val
+
+  def __delitem__(self, name):
+    del self.__tables[name]
+
+  def setName(self, name):
+    self.__name = name
+    return self
+
+  def name(self):
+    return self.__name
+
+  def setComment(self, comment):
+    self.__comment = comment
+    return self
+
+  def comment(self):
+    return self.__comment
     
 class Table(object):
   """Implements a simple relational table API.
@@ -461,7 +566,7 @@ class Table(object):
 
   def extend(self, fn):
     """Returns a new table with new column name(s) and value(s) contained
-		in the Row returnd from fn."""
+    in the Row returnd from fn."""
     ext_col_names = None
     new_rows = []
     for r in self.__rows:
@@ -724,6 +829,9 @@ class CLI(object):
     parser.add_option("-d", "--distinct", action="store_true", dest="distinct",
                       default=False, 
                       help="ensure output contains only distinct rows")
+    parser.add_option("-D", "--database", action="store_true", dest="database",
+                      default=False, 
+                      help="input is a database.")
     parser.add_option("-C", "--input-csv", action="store_true", 
                       dest="input_csv", default=False, 
                       help="input file(s) are CSV")
@@ -755,12 +863,16 @@ class CLI(object):
                       help="function to filter rows by")
     parser.add_option("", "--csv", action="store_true", dest="csv", 
                       default=False, help="output as CSV")
+    parser.add_option("", "--combine", action="store_true", dest="combine",
+                      default=False, help="combine tables into a database")
     parser.add_option("", "--comment", action="store", dest="comment",
                       default=False, help="add a comment to the table")
     parser.add_option("", "--debug", action="store_true", dest="debug",
                       default=False, help="start in the debugger")
     parser.add_option("", "--describe", action="store_true", dest="describe",
                       default=False, help="print the object definition")
+    parser.add_option("", "--extract", action="store", dest="extract",
+                      help="extract a table from the database")
     parser.add_option("", "--input-column-names", action="store", 
                       dest="input_column_names", default=None, 
                       help="specify column names for the input table")
@@ -781,7 +893,6 @@ class CLI(object):
     if self.options.debug:
       pdb.set_trace()
 
-    tables = {} 
     if self.args:
       while self.args:
         arg = self.args.pop(0)
@@ -789,17 +900,23 @@ class CLI(object):
           break
         fname = '<file:"' + arg + '">'
         if self.options.no_execute or self.options.verbose:
-          print >>stderr, "t = Table(" + fname + ")" 
+          if self.options.extract or self.options.database:
+            print >>stderr, "d = Database(" + fname + ")"
+          else:
+            print >>stderr, "t = Table(" + fname + ")" 
         if not self.options.no_execute:
           f = open(arg)
-          t = Table(f)
-          f.close()
-          if t.name():
-            tables[t.name()] = t
+          if self.options.extract or self.options.database:
+            d = Database(f)
           else:
-            name = os.path.splitext(os.path.basename(arg))[0]
-            tables[name] = t
-        
+            d = Database()
+            t = Table(f)
+            if t.name():
+              d[t.name()] = t
+            else:
+              name = os.path.splitext(os.path.basename(arg))[0]
+              d[name] = t
+          f.close()
     elif read_from_stdin or not thunk:
       f = stdin
       fname = '<stdin>'
@@ -813,10 +930,13 @@ class CLI(object):
           print >>stderr, "t = Table( " + fname + ")"
         if not self.options.no_execute:
           t = Table(f)
-      tables['stdin'] = t
+      d = Database()
+      d['stdin'] = t
+    else:
+      d = Database()
 
     if thunk:
-      t = thunk(tables, self.options, self.args)
+      t = thunk(d, self.options, self.args)
 
     if self.options.restrict:
       if self.options.no_execute or self.options.verbose:
@@ -883,26 +1003,53 @@ class CLI(object):
 
     if not self.options.no_execute:
       if self.options.name and self.options.comment:
-        t = Table({"name": self.options.name,
-                   "comment" : self.options.comment,
-                   "columns" : t.columns(),
-                   "rows": t.rows()})
+        if self.options.combine:
+          d.name = self.options.name
+          d.comment = self.options.comment
+        else:
+          t = Table({"name": self.options.name,
+                     "comment" : self.options.comment,
+                     "columns" : t.columns(),
+                     "rows": t.rows()})
       elif self.options.name:
-        t = Table({"name": self.options.name,
-                   "comment": t.comment(),
-                   "columns": t.columns(),
-                   "rows": t.rows()})
+        if self.options.combine:
+          d.name = self.options.name
+        else:
+          t = Table({"name": self.options.name,
+                     "comment": t.comment(),
+                     "columns": t.columns(),
+                     "rows": t.rows()})
       elif self.options.comment:
-        t = Table({"name": t.name(),
-                   "comment": self.options.comment,
-                   "columns": t.columns(),
-                   "rows": t.rows()})
+        if self.options.combine:
+          d.comment = self.options.comment
+        else:
+          t = Table({"name": t.name(),
+                     "comment": self.options.comment,
+                     "columns": t.columns(),
+                     "rows": t.rows()})
 
     if self.options.describe:
       if self.options.no_execute or self.options.verbose:
-        print >>stderr, "t.describe()"
+        if self.options.database:
+          print >>stderr, "d.describe()"
+        else:
+          print >>stderr, "t.describe()"
       if not self.options.no_execute:
-        print >>stdout, t.describe()
+        if self.options.database:
+          print >>stdout, d.describe()
+        else:
+          print >>stdout, t.describe()
+    elif self.options.combine:
+      if self.options.no_execute or self.options.verbose:
+        print >>stderr, "print d"
+      if not self.options.no_execute:
+        print >>stdout, d
+      return
+    elif self.options.extract:
+      if self.options.no_execute or self.options.verbose:
+        print >>stderr, "print d." + self.options.extract
+      if not self.options.no_execute:
+        print >>stdout, d[self.options.extract]
     elif self.options.csv:
       if self.options.no_execute or self.options.verbose:
         print >>stderr, "TableToCSV(stdout)"
