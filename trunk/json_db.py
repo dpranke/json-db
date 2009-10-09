@@ -105,35 +105,43 @@ class Database(object):
         self[t] = Table(obj['tables'][t])
 
   def __str__(self):
-    return self.dumps(True);
+    return self._dumps(True, False);
 
-  def dumps(self, include_data=True):
+  def __repr__(self):
     """Returns a compact version of the database as a JSON string."""
-    s =  '{ "version": ' + str(self.__version) + ','
-    s += '"kind": "' + self.__kind + '",'
-    
+    return str(self)
+
+  def _dumps(self, include_data=True, pretty=False):
+    """Returns a compact version of the database as a JSON string."""
+    if pretty:
+      p = "\n "
+    else:
+      p = " "
+    s =  '{'
+    s += '"version": ' + str(self.__version) + ',' + p
+    s += '"kind": "' + self.__kind + '",' + p
+        
     if self.__name:
-      s += '"name": "' + self.__name + '",'
+      s += '"name": "' + self.__name + '",' + p
     if self.__comment:
-      s += '"comment": "' + self.__comment + '",'
+      s += '"comment": "' + self.__comment + '",' + p
     s += '"tables": {'
+    if pretty:
+      s += p + "  "
     keys = self.__tables.keys()
     for i in range(len(keys)):
       t = self.__tables[keys[i]]
-      s +=  '"' + keys[i] + '": ' + t._dumps(include_data)
+      indent = len(keys[i]) + 8 
+      s +=  '"' + keys[i] + '": ' + t._dumps(include_data, pretty, indent)
       if i < len(keys)-1:
-        s += ','
+        s += ',' + p
     s += '}}'
     return s
 
   def describe(self):
     """Returns a JSON description of the database minus the rows."""
-    self._dumps(False)
+    return self._dumps(False, False)
     
-  def __repr__(self):
-    """Returns a compact version of the database as a JSON string."""
-    return self._dumps(True)
-
   def __eq__(self, other):
     """Databases are equal if they contain the same databases."""
     if self.__tables.keys() != other.__tables.keys():
@@ -272,43 +280,42 @@ class Table(object):
     return self.row(id)
 
   def __str__(self):
-    """Returns a pretty-printed version of the Table."""
+    """Returns a compact JSON version of the Table."""
     return self._dumps(True)
-
-  def _dumps(self, include_rows):
-    """Returns a pretty-printed version of the Table. If |include_rows| is
-    True, the contents of the Table are included; if not, just the metadata
-    for the table is included."""
-
-    s = "{"
-    s = s + ' "kind": ' + json.dumps(self.__kind) + ",\n "
-    if self.__name:
-      s = s + ' "name": ' + json.dumps(self.__name) + ",\n "
-    if self.__comment:
-      s = s + ' "comment": ' + json.dumps(self.__comment) + ",\n "
-    s = s + ' "version": ' + json.dumps(self.__version) + ",\n "
-    s = s + ' "columns": ' + json.dumps(self.__columns) + ",\n "
-    if self.__primary_key:
-      s = s + ' "primary key": ' + json.dumps(self.__primary_key) + ",\n " 
-    s = s + ' "rows":   ['
-    if include_rows:
-      s = s + ",\n             ".join([json.dumps(r) for r in self.__rows])
-    s = s + ']'
-    s = s + "}"
-    return s;
 
   def __repr__(self):
     """Returns a compact JSON representation of the Table."""
-    d = {}
-    d['version'] = self.__version
-    d['kind'] = self.__kind
-    d['rows'] = self.__rows
-    d['columns'] = self.__columns
-    if self.__primary_key:
-      d['primary key'] = self.__primary_key
+    return str(self)
+
+  def _dumps(self, include_data=True, pretty=False, indent=1):
+    """Returns a pretty-printed version of the Table. If |include_data| is
+    True, the contents of the Table are included; if not, just the metadata
+    for the table is included."""
+    
+    if pretty:
+      p = "\n" + " " * indent
+    else:
+      p = " "
+    s = "{"
+    s = s + '"kind": ' + json.dumps(self.__kind) + "," + p
     if self.__name:
-      d['name' ] = self.__name
-    return json.dumps(d) 
+      s = s + '"name": ' + json.dumps(self.__name) + "," + p
+    if self.__comment:
+      s = s + '"comments": ' + json.dumps(self.__comment) + "," + p
+    s = s + '"version": ' + json.dumps(self.__version) + "," + p
+    s = s + '"columns": ' + json.dumps(self.__columns) + "," + p
+    if self.__primary_key:
+      s = s + '"primary key": ' + json.dumps(self.__primary_key) + "," + p 
+    s = s + '"rows": ['
+    if pretty:
+      rowsep = ",\n" + " " * (indent + 9)
+    else:
+      rowsep = ", "
+    if include_data:
+      s = s + rowsep.join([json.dumps(r) for r in self.__rows])
+    s = s + ']'
+    s = s + "}"
+    return s;
 
   def __len__(self):
     return len(self.__rows)
@@ -837,8 +844,6 @@ class CLI(object):
                       help="input file(s) are CSV")
     parser.add_option("-e", "--extend", action="store", 
                       dest="extend", help="function to extend the table by.")
-    parser.add_option("-j", "--json", action="store_true", dest="json", 
-                      default=True, help="output as JSON")
     parser.add_option("-J", "--input-json", action="store_true", 
                       dest="input_json", default=False, 
                       help="input file(s) are JSON")
@@ -851,6 +856,8 @@ class CLI(object):
                       default=False, help="specify the sort order")
     parser.add_option("-p", "--project", action="store", dest="project",
                       help="list of columns to project." )
+    parser.add_option("-P", "--pretty", action="store_true", dest="pretty", 
+                      default=False, help="pretty-print the output")
     parser.add_option("-s", "--summarize-per", action="store", 
                       dest="summarize_per", help="columns to summarize over" )
     parser.add_option("-S", "--summarize-add", action="store", 
@@ -1043,7 +1050,7 @@ class CLI(object):
       if self.options.no_execute or self.options.verbose:
         print >>stderr, "print d"
       if not self.options.no_execute:
-        print >>stdout, d
+        print >>stdout, d._dumps(True, self.options.pretty)
       return
     elif self.options.extract:
       if self.options.no_execute or self.options.verbose:
@@ -1055,11 +1062,11 @@ class CLI(object):
         print >>stderr, "TableToCSV(stdout)"
       if not self.options.no_execute:
         TableToCSV(stdout, t, self.options.null)
-    elif self.options.json:
+    else:
       if self.options.no_execute or self.options.verbose:
         print >>stderr, "print t"
       if not self.options.no_execute:
-        print >>stdout, t 
+        print >>stdout, t._dumps(True, self.options.pretty) 
 
 #
 # PRIVATE HELPER FUNCTIONS
