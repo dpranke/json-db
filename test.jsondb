@@ -1,0 +1,6 @@
+{ "kind": "table",
+  "version": 1,
+  "name": "test",
+  "columns": ["a", "b"],
+  "rows":   [[1, 2],
+             [3, 4]]}
