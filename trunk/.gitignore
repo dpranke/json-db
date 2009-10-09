@@ -1,0 +1,8 @@
+# ignore python object files
+*.swp
+*.pyc
+.cover.*.py
+.coverage*
+*,cover
+
+

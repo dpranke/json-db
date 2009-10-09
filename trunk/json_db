@@ -1,0 +1,3 @@
+#!/bin/sh
+exec_dir=$(dirname $0)
+python "$exec_dir/json_db.py" "$@"
