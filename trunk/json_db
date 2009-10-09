@@ -12,5 +12,5 @@
 #     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #     See the License for the specific language governing permissions and
 #     limitations under the License.
-exec_dir=$(dirname $0)
+exec_dir=$(dirname $0)/python
 python2.5 "$exec_dir/json_db.py" "$@"

@@ -53,9 +53,9 @@ class CLITests(unittest.TestCase):
     stdin = MockStream()
     stdout = MockStream()
     stderr = MockStream()
-    Main(None, False, ["test.jsondb"], stdin, stdout, stderr)
-    Main(None, False, ["-n", "test.jsondb"], stdin, stdout, stderr)
-    Main(None, False, ["--verbose", "test.jsondb"], stdin, stdout, stderr)
+    Main(None, False, ["../test.jsondb"], stdin, stdout, stderr)
+    Main(None, False, ["-n", "../test.jsondb"], stdin, stdout, stderr)
+    Main(None, False, ["--verbose", "../test.jsondb"], stdin, stdout, stderr)
 
 class TableTests(unittest.TestCase):
   """Do some basic testing for json_db."""
