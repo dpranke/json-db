@@ -1109,7 +1109,7 @@ def _merge_rows(srow, orow, other_idx):
 def Main(thunk = None, read_from_stdin=True, args=None,
          stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr):
   cli = CLI()
-  parser = optparse.OptionParser("usage: %prog [options]") 
+  parser = optparse.OptionParser("usage: json_db [options]") 
   cli.add_params(parser)
   cli.opt_parse(parser, args)
   cli.run(thunk, read_from_stdin, stdin, stdout, stderr)
