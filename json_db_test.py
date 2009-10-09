@@ -91,21 +91,16 @@ class TableTests(unittest.TestCase):
 
 
   def jsonOne(self):
-     return '{"primary key": "a", "rows": [[1, 2], [3, 4]], "kind": "table", "version": 1, "columns": ["a", "b"]}'
+     return '{"kind": "table", "version": 1, "columns": ["a", "b"], "primary key": "a", "rows": [[1, 2], [3, 4]]}'
 
   def jsonTwo(self):
-    return '{"rows": [[1, 2], [3, 4]], "kind": "table", "version": 1, "columns": ["c0", "c1"]}'
+    return '{"kind": "table", "version": 1, "columns": ["c0", "c1"], "rows": [[1, 2], [3, 4]]}'
 
   def jsonEmp(self):
     return '{"primary key": "empno", "rows": [[1], [2], [3]], "version": 1, "columns": ["empno"], "name": "emp"}'
              
   def testConstructors(self):
-    self.assertEqual(str(self.tableOne()), """{ "kind": "table",
-  "version": 1,
-  "columns": ["a", "b"],
-  "primary key": "a",
-  "rows":   [[1, 2],
-             [3, 4]]}""")
+    self.assertEqual(str(self.tableOne()), """{"kind": "table", "version": 1, "columns": ["a", "b"], "primary key": "a", "rows": [[1, 2], [3, 4]]}""")
     self.assertEqual(repr(Table({"rows": [[1, 2], [3, 4]]})), self.jsonTwo())
     self.assertEqual(Table({"rows": [[1,2],[3,4]], "version": 1}),
                      Table({"rows": [[1,2],[3,4]]}))
@@ -378,6 +373,9 @@ class TableTests(unittest.TestCase):
         Table({"columns": ["a", "max_b", "min_b"],
                "rows":   [[ 1 , 4, 2],
                           [ 2 , 5, 2]]}));
+
+    self.assertEqual(t1.summarize([]), 
+        Table({"columns": ["count"], "rows": [[6]]}))
 
   def testDistinct(self):
     t1 = Table({"columns" : ["a", "b"],

@@ -859,7 +859,8 @@ class CLI(object):
     parser.add_option("-P", "--pretty", action="store_true", dest="pretty", 
                       default=False, help="pretty-print the output")
     parser.add_option("-s", "--summarize-per", action="store", 
-                      dest="summarize_per", help="columns to summarize over" )
+                      default=None, dest="summarize_per", 
+                      help="columns to summarize over" )
     parser.add_option("-S", "--summarize-add", action="store", 
                       dest="summarize_add",
                       help="function to add additional columns to the summary" )
@@ -972,15 +973,17 @@ class CLI(object):
       if not self.options.no_execute:
         t = t.distinct()
 
-    if self.options.summarize_per:
-      summarize_per = self.options.summarize_per.split(",")
+    if self.options.summarize_per is not None:
+      if self.options.summarize_per == "":
+        summarize_per = [] 
+      else:
+        summarize_per = self.options.summarize_per.split(",")
       if self.options.no_execute or self.options.verbose:
         if self.options.summarize_add:
           astr = ", " + self.options.summarize_add
         else:
           astr = ""
-        print >>stderr, "t = t.summarize(" + str(summarize_per) + "]" + \
-            astr + ")"
+        print >>stderr, "t = t.summarize(" + str(summarize_per) + astr + ")"
       if not self.options.no_execute:
         if self.options.summarize_add:
           summarize_add = eval(self.options.summarize_add)
@@ -1064,9 +1067,15 @@ class CLI(object):
         TableToCSV(stdout, t, self.options.null)
     else:
       if self.options.no_execute or self.options.verbose:
-        print >>stderr, "print t"
+        if self.options.database:
+          print >>stderr, "print d"
+        else:
+          print >>stderr, "print t"
       if not self.options.no_execute:
-        print >>stdout, t._dumps(True, self.options.pretty) 
+        if self.options.database:
+          print >>stdout, d._dumps(True, self.options.pretty) 
+        else:
+         print >>stdout, t._dumps(True, self.options.pretty) 
 
 #
 # PRIVATE HELPER FUNCTIONS
