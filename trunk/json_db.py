@@ -495,6 +495,12 @@ class Table(object):
       //                       [1, 3, 3, 5]]})
     """
 
+    def sum(l):
+      r = 0
+      for el in l:
+        r += x
+      return r
+
     per_columns = [c.strip() for c in per_column_names]
     per_lower_columns = [c.lower() for c in per_columns]
 
@@ -894,8 +900,7 @@ class CLI(object):
       if self.options.no_execute or self.options.verbose:
         print >>stderr, "TableToCSV(stdout)"
       if not self.options.no_execute:
-        writer = csv.writer(stdout)
-        TableToCSV(writer, t)
+        TableToCSV(stdout, t)
     elif self.options.json:
       if self.options.no_execute or self.options.verbose:
         print >>stderr, "print t"
