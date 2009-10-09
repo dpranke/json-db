@@ -32,14 +32,19 @@ def TableFromCSV(stream, has_headings=False, headings=None):
     d['rows'].append(r)
   return Table(d)
 
-def TableToCSV(stream, t):
+def TableToCSV(stream, t, nullvalue=None):
     """Writes a CSV representation (as per RFC 4180) of the Table t to the w 
     object. The stream object can be any object with a write() method."""
+    def nullstr(c):
+      if c is None:
+        return nullvalue
+      return c
+
     try:
       w = csv.writer(stream)
       w.writerow(t.columns())
       for r in t:
-        w.writerow(r)
+        w.writerow([nullstr(c) for c in r])
     except IOError:
       pass
  
@@ -764,6 +769,8 @@ class CLI(object):
                       help="input data has column names")
     parser.add_option("", "--name", action="store", dest="name",
                       default=False, help="add a name to the table")
+    parser.add_option("", "--null", action="store", dest="null",
+                      default=None, help="use the specified string for Null values")
 
   def opt_parse(self, parser, args):
     """Parse the command line."""
@@ -887,7 +894,7 @@ class CLI(object):
                    "rows": t.rows()})
       elif self.options.comment:
         t = Table({"name": t.name(),
-                   "comment": comment,
+                   "comment": self.options.comment,
                    "columns": t.columns(),
                    "rows": t.rows()})
 
@@ -900,7 +907,7 @@ class CLI(object):
       if self.options.no_execute or self.options.verbose:
         print >>stderr, "TableToCSV(stdout)"
       if not self.options.no_execute:
-        TableToCSV(stdout, t)
+        TableToCSV(stdout, t, self.options.null)
     elif self.options.json:
       if self.options.no_execute or self.options.verbose:
         print >>stderr, "print t"
