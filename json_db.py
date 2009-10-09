@@ -13,7 +13,7 @@ import types
 
 CURRENT_TABLE_VERSION = 1
 
-def TableFromCSV(csv, has_headings=False, headings=None):
+def TableFromCSV(stream, has_headings=False, headings=None):
   """Returns the table corresponding to the given CSV object.
   
   The CSV object can be any object that supports the iterator protocol and
@@ -21,7 +21,7 @@ def TableFromCSV(csv, has_headings=False, headings=None):
   builtin csv.reader() method. If has_headings is true, the first string
   is used to be the column headings. If has_headings is false but headings
   is not None, headings is used as the column headings."""
-  reader = csv.reader(csv)
+  reader = csv.reader(stream)
   d = {}
   if has_headings:
     d['columns'] = reader.next()
@@ -32,10 +32,11 @@ def TableFromCSV(csv, has_headings=False, headings=None):
     d['rows'].append(r)
   return Table(d)
 
-def TableToCSV(w, t):
+def TableToCSV(stream, t):
     """Writes a CSV representation (as per RFC 4180) of the Table t to the w 
-    object. The w object can be any object with a write() method."""
+    object. The stream object can be any object with a write() method."""
     try:
+      w = csv.writer(stream)
       w.writerow(t.columns())
       for r in t:
         w.writerow(r)
@@ -122,7 +123,8 @@ class Table(object):
 
     if obj.has_key('columns'):
       if type(obj['columns']) != types.ListType:
-        raise ValueError
+        raise ValueError("object column value %s isn't a list" % 
+                         (str(obj['columns'])))
       self.__columns = obj['columns']
     else:
       if len(self.__rows) == 0 or len(self.__rows[0]) == 0:
@@ -135,7 +137,8 @@ class Table(object):
     # verify that # of columns matches # of columns in each row
     for r in self.__rows:
       if type(r) != types.ListType or len(r) != len(self.__columns):
-        raise ValueError
+        raise ValueError("no. of columns in row differs from header (%s,%s)" %
+                         (str(self.__columns), str(r)))
 
     if obj.has_key('primary key'):
       self.__primary_key = obj['primary key']
@@ -151,24 +154,36 @@ class Table(object):
       self.__comment = obj['comment']
     if obj.has_key('version'):
       self.__version = obj['version']
+    if obj.has_key('kind') and obj['kind'] != 'table':
+        raise ValueError("object kind %s isn't a table" % (str(obj['kind'])))
+    self.__kind = 'table' 
 
   def __getitem__(self, id):
     return self.row(id)
 
   def __str__(self):
     """Returns a pretty-printed version of the Table."""
+    return self._dumps(True)
+
+  def _dumps(self, include_rows):
+    """Returns a pretty-printed version of the Table. If |include_rows| is
+    True, the contents of the Table are included; if not, just the metadata
+    for the table is included."""
+
     s = "{"
+    s = s + ' "kind": ' + json.dumps(self.__kind) + ",\n "
     if self.__name:
       s = s + ' "name": ' + json.dumps(self.__name) + ",\n "
     if self.__comment:
       s = s + ' "comment": ' + json.dumps(self.__comment) + ",\n "
     s = s + ' "version": ' + json.dumps(self.__version) + ",\n "
     s = s + ' "columns": ' + json.dumps(self.__columns) + ",\n "
-    s = s + ' "rows":   ['
-    s = s + ",\n             ".join([json.dumps(r) for r in self.__rows])
-    s = s + ']'
     if self.__primary_key:
-      s = s + ',\n  "primary key": ' + json.dumps(self.__primary_key)  
+      s = s + ' "primary key": ' + json.dumps(self.__primary_key) + ",\n " 
+    s = s + ' "rows":   ['
+    if include_rows:
+      s = s + ",\n             ".join([json.dumps(r) for r in self.__rows])
+    s = s + ']'
     s = s + "}"
     return s;
 
@@ -176,6 +191,7 @@ class Table(object):
     """Returns a compact JSON representation of the Table."""
     d = {}
     d['version'] = self.__version
+    d['kind'] = self.__kind
     d['rows'] = self.__rows
     d['columns'] = self.__columns
     if self.__primary_key:
@@ -203,6 +219,10 @@ class Table(object):
     """Returns the name of the table, if it has one."""
     return self.__name
 
+  def kind(self):
+    """Returns the JSON-DB object type for the table ("table")."""
+    return self.__kind
+
   def comment(self):
     """Returns the comment describing the table, if it has one."""
     return self.__comment
@@ -210,6 +230,10 @@ class Table(object):
   def columns(self):
     """Returns the list of columns in the Table."""
     return self.__columns
+
+  def describe(self):
+    """Returns a JSON description minus the rows."""
+    return self._dumps(False)
 
   def row(self, id):
     """Returns the row containing the primary key, or, if id is a number,
@@ -420,10 +444,19 @@ class Table(object):
         new_rows.append(r)
     return Table({"columns": self.__columns, "rows": new_rows})
 
+  def update(self, fn):
+    """Returns a new table with |fn| applied to each row."""
+    new_rows = []
+    for r in self.__rows:
+      row = Row(self.__columns, r)
+      ext_row = fn(row)
+      new_rows.append(row.values())
+    return Table({"columns": self.__columns, "rows": new_rows, 
+                  "name": self.__name})
+
   def extend(self, fn):
-    """Returns a new table with new column name(s) listed by the keys in
-    |dict| and each row extended to represent the values returned by the
-    values in |dict|.""" 
+    """Returns a new table with new column name(s) and value(s) contained
+		in the Row returnd from fn."""
     ext_col_names = None
     new_rows = []
     for r in self.__rows:
@@ -620,6 +653,12 @@ class Row(object):
   def __getattr__(self, attr):
     return self.lookup(attr)
 
+  def __setattr__(self, attr, value):
+    if self.__lookup.has_key(attr.lower()):
+      self.__values[self.__lookup[attr.lower()]] = value
+    else:
+      object.__setattr__(self, attr, value)
+
   def __len__(self):
     return len(self.__values)
 
@@ -710,6 +749,8 @@ class CLI(object):
                       default=False, help="add a comment to the table")
     parser.add_option("", "--debug", action="store_true", dest="debug",
                       default=False, help="start in the debugger")
+    parser.add_option("", "--describe", action="store_true", dest="describe",
+                      default=False, help="print the object definition")
     parser.add_option("", "--input-column-names", action="store", 
                       dest="input_column_names", default=None, 
                       help="specify column names for the input table")
@@ -719,20 +760,24 @@ class CLI(object):
     parser.add_option("", "--name", action="store", dest="name",
                       default=False, help="add a name to the table")
 
-  def opt_parse(self, parser):
+  def opt_parse(self, parser, args):
     """Parse the command line."""
-    (self.options, self.args) = parser.parse_args()
+    (self.options, self.args) = parser.parse_args(args)
 
-  def run(self, thunk=None, read_from_stdin=True):
+  def run(self, thunk=None, read_from_stdin=True, stdin=sys.stdin,
+          stdout=sys.stdout, stderr=sys.stderr):
     if self.options.debug:
       pdb.set_trace()
 
     tables = {} 
     if self.args:
-      for arg in self.args:
+      while self.args:
+        arg = self.args.pop(0)
+        if arg == "-":
+          break
         fname = '<file:"' + arg + '">'
         if self.options.no_execute or self.options.verbose:
-          print >>sys.stderr, "t = Table(" + fname + ")" 
+          print >>stderr, "t = Table(" + fname + ")" 
         if not self.options.no_execute:
           f = open(arg)
           t = Table(f)
@@ -742,18 +787,18 @@ class CLI(object):
           else:
             name = os.path.splitext(os.path.basename(arg))[0]
             tables[name] = t
-
+        
     elif read_from_stdin or not thunk:
-      f = sys.stdin
+      f = stdin
       fname = '<stdin>'
       if self.options.input_csv:
         if self.options.no_execute or self.options.verbose:
-          print >>sys.stderr, "t = TableFromCSV(" + fname + ")" 
+          print >>stderr, "t = TableFromCSV(" + fname + ")" 
         if not self.options.no_execute:
-          t = TableFromCSV(sys.stdin)
+          t = TableFromCSV(stdin)
       else:
         if self.options.no_execute or self.options.verbose:
-          print >>sys.stderr, "t = Table( " + fname + ")"
+          print >>stderr, "t = Table( " + fname + ")"
         if not self.options.no_execute:
           t = Table(f)
       tables['stdin'] = t
@@ -763,7 +808,7 @@ class CLI(object):
 
     if self.options.restrict:
       if self.options.no_execute or self.options.verbose:
-        print >>sys.stderr, "t = t.restrict(" + self.options.restrict + ")"
+        print >>stderr, "t = t.restrict(" + self.options.restrict + ")"
       if not self.options.no_execute:
         lambda_fn = eval(self.options.restrict)
         t = t.restrict(lambda_fn)
@@ -771,20 +816,20 @@ class CLI(object):
     if self.options.project:
       project = self.options.project.split(',')
       if self.options.no_execute or self.options.verbose:
-        print >>sys.stderr, "t = t.project(" + str(project) + ")"
+        print >>stderr, "t = t.project(" + str(project) + ")"
       if not self.options.no_execute:
         t = t.project(project)
 
     if self.options.extend:
       if self.options.no_execute or self.options.verbose:
-        print >>sys.stderr, "t = t.extend([" + self.options.extend + ")"
+        print >>stderr, "t = t.extend([" + self.options.extend + ")"
       if not self.options.no_execute:
         lambda_fn = eval(self.options.extend)
         t = t.extend(lambda_fn)
 
     if self.options.distinct:
       if self.options.no_execute or self.options.verbose:
-        print >>sys.stderr, "t = t.distinct()"
+        print >>stderr, "t = t.distinct()"
       if not self.options.no_execute:
         t = t.distinct()
 
@@ -795,7 +840,7 @@ class CLI(object):
           astr = ", " + self.options.summarize_add
         else:
           astr = ""
-        print >>sys.stderr, "t = t.summarize(" + str(summarize_per) + "]" + \
+        print >>stderr, "t = t.summarize(" + str(summarize_per) + "]" + \
             astr + ")"
       if not self.options.no_execute:
         if self.options.summarize_add:
@@ -807,19 +852,19 @@ class CLI(object):
     if self.options.order_by:
       order_by = self.options.order_by.split(',')
       if self.options.no_execute or self.options.verbose:
-        print >>sys.stderr, "t = t.order_by(" + str(order_by) + ")"
+        print >>stderr, "t = t.order_by(" + str(order_by) + ")"
       if not self.options.no_execute:
         t = t.orderBy(order_by) 
 
     if self.options.limit:
       if self.options.no_execute or self.options.verbose:
-        print >>sys.stderr, "t = t.limit(" + self.options.limit + ")"
+        print >>stderr, "t = t.limit(" + self.options.limit + ")"
       if not self.options.no_execute:
         t = t.limit(int(self.options.limit)) 
 
     if self.options.count:
       if self.options.no_execute or self.options.verbose:
-        print >>sys.stderr, \
+        print >>stderr, \
             "t = Table({'columns':['count'], 'rows':[[len(t)]]})"
       if not self.options.no_execute:
         t = Table({'columns':['count'], 'rows':[[len(t)]]})
@@ -841,17 +886,22 @@ class CLI(object):
                    "columns": t.columns(),
                    "rows": t.rows()})
 
-    if self.options.csv:
+    if self.options.describe:
       if self.options.no_execute or self.options.verbose:
-        print >>sys.stderr, "TableToCSV(sys.stdout)"
+        print >>stderr, "t.describe()"
       if not self.options.no_execute:
-        writer = csv.writer(sys.stdout)
+        print >>stdout, t.describe()
+    elif self.options.csv:
+      if self.options.no_execute or self.options.verbose:
+        print >>stderr, "TableToCSV(stdout)"
+      if not self.options.no_execute:
+        writer = csv.writer(stdout)
         TableToCSV(writer, t)
     elif self.options.json:
       if self.options.no_execute or self.options.verbose:
-        print >>sys.stderr, "print t"
+        print >>stderr, "print t"
       if not self.options.no_execute:
-        print t 
+        print >>stdout, t 
 
 #
 # PRIVATE HELPER FUNCTIONS
@@ -870,12 +920,13 @@ def _merge_rows(srow, orow, other_idx):
 # MAIN
 #
 
-def Main(thunk = None, read_from_stdin=True):
+def Main(thunk = None, read_from_stdin=True, args=None,
+         stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr):
   cli = CLI()
   parser = optparse.OptionParser("usage: %prog [options]") 
   cli.add_params(parser)
-  cli.opt_parse(parser)
-  cli.run(thunk, read_from_stdin)
+  cli.opt_parse(parser, args)
+  cli.run(thunk, read_from_stdin, stdin, stdout, stderr)
 
 if __name__ == '__main__':
   Main()
