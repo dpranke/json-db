@@ -17,6 +17,7 @@
 from json_db import *
 
 import unittest
+import sys
 
 class MockStream(object):
   def __init__(self, input = None):
@@ -68,7 +69,8 @@ class TableTests(unittest.TestCase):
     return Table({"rows": [[1, 2], [3, 4]]})
 
   def tableEmp(self):
-    return Table({"name": "emp", "columns":["empno"], "rows":[[1],[2],[3]],
+    return Table({"name": "emp", "columns":["empno", "dept"], 
+                  "rows":[[1, 1],[2, 2],[3, 3]],
                   "primary key": "empno"})
 
   def tableThree(self):
@@ -348,6 +350,25 @@ class TableTests(unittest.TestCase):
   def testUnion(self):
     self.assertEqual(self.tableThree().union(self.tableFour()),
                      self.tableFive())
+
+    t = self.tableEmp().union(Table({"name": "emp", 
+       "columns":["empno", "dept"], "rows": [[1,1],[5,5]], 
+       "primary key": "empno"}))
+    self.assertEqual(t, Table({"name": "emp", 
+       "columns":["empno", "dept"], "rows": [[1,1],[2,2],[3,3],[5,5]], 
+       "primary key": "empno"}))
+    
+    t = None
+    msg = ""
+    try:
+      t = self.tableEmp().union(Table({"name": "emp", 
+       "columns":["empno", "dept"], "rows": [[1,3],[5,5]], 
+       "primary key": "empno"}))
+    except ValueError, e:
+      msg = str(e)
+      pass
+    self.assertEqual(t, None)
+    self.assertEqual(msg, "duplicate primary key \"1\" in union")
 
   def testIntersect(self):
     self.assertEqual(self.tableFive().intersect(self.tableThree()),

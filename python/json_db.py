@@ -270,7 +270,7 @@ class Table(object):
         raise ValueError("no. of columns in row differs from header (%s,%s)" %
                          (str(self.__columns), str(r)))
 
-    if obj.has_key('primary key'):
+    if obj.has_key('primary key') and obj['primary key'] is not None:
       self.__primary_key = obj['primary key']
       self.__pk_column_index = self.__column_indices[self.__primary_key.lower()]
       i = 0
@@ -535,13 +535,20 @@ class Table(object):
     if not isinstance(other, Table) or self.__columns != other.__columns:
       return ValueError
     rows = []
-    for r in self.__rows:
-      if not r in rows:
-        rows.append(r)
+    rows.extend(self.__rows)
     for r in other.__rows:
-      if not r in rows:
+      if self.__primary_key:
+        key = str(r[self.__pk_column_index])
+        if not self.__keys.has_key(key):
+          rows.append(r)
+        elif self.__rows[self.__keys[key]] != r:
+          raise ValueError('duplicate primary key "%s" in union' % (key))
+      elif not r in rows:
         rows.append(r)
-    return Table({"columns": self.__columns, "rows": rows})
+    d = { "columns": self.__columns,
+          "rows": rows,
+          "primary key": self.__primary_key }
+    return Table(d)
 
   def intersect(self, other):
     """Returns the intersection of the two tables. The tables must have the
@@ -552,7 +559,10 @@ class Table(object):
     for r in self.__rows:
       if r in other.__rows:
         rows.append(r)
-    return Table({"columns": self.__columns, "rows": rows})
+    d = { "columns": self.__columns,
+          "rows": rows,
+          "primary key": self.__primary_key }
+    return Table(d)
 
   def minus(self, other):
     """Returns the rows in self that are not in other. The tables must have the
@@ -563,7 +573,10 @@ class Table(object):
     for r in self.__rows:
       if not r in other.__rows:
         rows.append(r)
-    return Table({"columns": self.__columns, "rows": rows})
+    d = { "columns": self.__columns,
+          "rows": rows,
+          "primary key": self.__primary_key }
+    return Table(d)
 
   def distinct(self):
     """Returns a new table with all duplicate rows removed."""
@@ -571,7 +584,10 @@ class Table(object):
     for r in self.__rows:
       if not r in new_rows:
         new_rows.append(r)
-    return Table({"columns": self.__columns, "rows": new_rows})
+    d = { "columns": self.__columns,
+          "rows": new_rows,
+          "primary key": self.__primary_key }
+    return Table(d)
 
   def update(self, fn):
     """Returns a new table with |fn| applied to each row."""
@@ -580,8 +596,10 @@ class Table(object):
       row = Row(self.__columns, r)
       ext_row = fn(row)
       new_rows.append(row.values())
-    return Table({"columns": self.__columns, "rows": new_rows, 
-                  "name": self.__name})
+    d = { "columns": self.__columns,
+          "rows": new_rows,
+          "primary key": self.__primary_key }
+    return Table(d)
 
   def extend(self, fn):
     """Returns a new table with new column name(s) and value(s) contained
@@ -595,7 +613,10 @@ class Table(object):
       if not ext_col_names:
         ext_col_names = ext_row.columns()[:]
       new_rows.append(new_row + ext_row.values())
-    return Table({"columns": self.__columns + ext_col_names, "rows": new_rows})
+    d = { "columns" : self.__columns + ext_col_names,
+          "rows" : new_rows,
+          "primary key" : self.__primary_key }
+    return Table(d)
 
   def summarize(self, per_column_names, add_fn=None):
     """Returns a new table summarized over the list of columns in 
