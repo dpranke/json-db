@@ -1052,6 +1052,7 @@ class CLI(object):
     if self.options.summarize_per is not None:
       if self.options.summarize_per == "":
         summarize_per = [] 
+        astr = ""
       else:
         summarize_per = self.options.summarize_per.split(",")
         if self.options.summarize_add:
@@ -1088,7 +1089,7 @@ class CLI(object):
     if self.options.name:
       o.setName(self.options.name)
     if self.options.comment:
-      o.setName(self.options.comment)
+      o.setComment(self.options.comment)
 
     if self.options.extract:
       if self.trace("print d[" + self.options.extract + "]"):
