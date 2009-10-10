@@ -318,7 +318,7 @@ class Table(object):
     else:
       p = " "
       start = ""
-      end = "\n"
+      end = ""
     s = "{" + start
     s = s + '"kind": ' + json.dumps(self.__kind) + "," + p
     if self.__name:
@@ -879,17 +879,19 @@ class CLI(object):
     """Adds common command line options to an optparser object."""
     parser.add_option("-c", "--count", action="store_true", dest="count",
                       default=False, help="print # of rows in table")
-    parser.add_option("-d", "--distinct", action="store_true", dest="distinct",
+    parser.add_option("-D", "--distinct", action="store_true", dest="distinct",
                       default=False, 
                       help="ensure output contains only distinct rows")
-    parser.add_option("-D", "--database", action="store_true", dest="database",
+    parser.add_option("-d", "--database", action="store", dest="database",
                       default=False, 
-                      help="input is a database.")
+                      help="open and read database.")
     parser.add_option("-C", "--input-csv", action="store_true", 
                       dest="input_csv", default=False, 
                       help="input file(s) are CSV")
     parser.add_option("-e", "--extend", action="store", 
                       dest="extend", help="function to extend the table by.")
+    parser.add_option("-f", "--file", action="append", 
+                      dest="extend", help="open and read file.")
     parser.add_option("-J", "--input-json", action="store_true", 
                       dest="input_json", default=False, 
                       help="input file(s) are JSON")
@@ -898,23 +900,27 @@ class CLI(object):
     parser.add_option("-n", "--no-execute", action="store_true", 
                       dest="no_execute", default=False, 
                       help="show commands but don't execute them")
-    parser.add_option("-o", "--order-by", action="store", dest="order_by",
+    parser.add_option("-o", "--output", action="store", dest="output",
+                      help="output filename")
+    parser.add_option("-O", "--order-by", action="store", dest="order_by",
                       default=False, help="specify the sort order")
     parser.add_option("-p", "--project", action="store", dest="project",
                       help="list of columns to project." )
     parser.add_option("-P", "--pretty", action="store_true", dest="pretty", 
                       default=False, help="pretty-print the output")
+    parser.add_option("-r", "--restrict", action="store", dest="restrict",
+                      help="function to filter rows by")
     parser.add_option("-s", "--summarize-per", action="store", 
                       default=None, dest="summarize_per", 
                       help="columns to summarize over" )
     parser.add_option("-S", "--summarize-add", action="store", 
                       dest="summarize_add",
                       help="function to add additional columns to the summary" )
+    parser.add_option("-t", "--table", action="append",
+                      dest="table", help="open and read table")
     parser.add_option("-v", "--verbose", action="store_true", 
                       dest="verbose", default=False, 
                       help="print commands along with executing them")
-    parser.add_option("-r", "--restrict", action="store", dest="restrict",
-                      help="function to filter rows by")
     parser.add_option("", "--csv", action="store_true", dest="csv", 
                       default=False, help="output as CSV")
     parser.add_option("", "--combine", action="store_true", dest="combine",
@@ -941,82 +947,94 @@ class CLI(object):
   def opt_parse(self, parser, args):
     """Parse the command line."""
     (self.options, self.args) = parser.parse_args(args)
+      
+  def readDB(self, name):
+    if name == "-":
+      f = stdin
+    else:
+      if not self.options.no_execute:
+        f = open(name)
+        
+    self.trace("d = Database(" + name + ")")
+    if not self.options.no_execute:
+      d = Database(f)
+      if not d.name() and name != '-':
+        name = os.path.splitext(os.path.basename(name))[0]
+        d.setName(name)
+      f.close()
 
-  def run(self, thunk=None, read_from_stdin=True, stdin=sys.stdin,
-          stdout=sys.stdout, stderr=sys.stderr):
+  def trace(self, str):
+    """Log the message to stderr and return whether or not to execute."""
+    if self.options.no_execute or self.options.verbose:
+      print >>self.stderr, str
+    return not self.options.no_execute
+
+  def readTable(self, name):
+    """read a Table from the given filename. '-' can be used to indicate
+    stdin."""
+    if name == "-":
+      f = stdin
+    else:
+      if not self.options.no_execute:
+        f = open(name)
+        
+    self.trace("t = Table(" + name + ")")
+    t = None
+    if not self.options.no_execute:
+      t = Table(f)
+      if not t.name() and name != '-':
+        name = os.path.splitext(os.path.basename(name))[0]
+        t.setName(name)
+      f.close()
+    return t
+
+  def run(self, thunk=None, stdin=sys.stdin, stdout=sys.stdout, 
+          stderr=sys.stderr):
     if self.options.debug:
       pdb.set_trace()
+    self.stdin = stdin
+    self.stdout = stdout
+    self.stderr = stderr
 
-    d = Database()
-    if self.args:
-      while self.args:
-        arg = self.args.pop(0)
-        if arg == "-":
-          break
-        fname = '<file:"' + arg + '">'
-        if self.options.no_execute or self.options.verbose:
-          if self.options.extract or self.options.database:
-            print >>stderr, "d = Database(" + fname + ")"
-          else:
-            print >>stderr, "t = Table(" + fname + ")" 
-        if not self.options.no_execute:
-          f = open(arg)
-          if self.options.extract or self.options.database:
-            d = Database(f)
-          else:
-            t = Table(f)
-            if t.name():
-              d[t.name()] = t
-            else:
-              name = os.path.splitext(os.path.basename(arg))[0]
-              d[name] = t
-          f.close()
-    elif read_from_stdin or not thunk:
-      f = stdin
-      fname = '<stdin>'
-      if self.options.input_csv:
-        if self.options.no_execute or self.options.verbose:
-          print >>stderr, "t = TableFromCSV(" + fname + ")" 
-        if not self.options.no_execute:
-          t = TableFromCSV(stdin)
-      else:
-        if self.options.no_execute or self.options.verbose:
-          print >>stderr, "t = Table( " + fname + ")"
-        if not self.options.no_execute:
-          t = Table(f)
-      d = Database()
-      d['stdin'] = t
+    if self.options.output and self.options.output != "-":
+      self.output = open(self.options.output, "w")
     else:
-      d = Database()
+      self.output = stdout
+
+    db = Database()
+    if self.options.database:
+      db = self.readDB()
+    self.db = db
+   
+    t = None
+    if self.options.table:
+      table_names = self.options.table
+      while len(table_names):
+        table_name = table_names.pop(0)
+        t = self.readTable(table_name);
+        if t:
+          db[t.name()] = t
 
     if thunk:
-      t = thunk(d, self.options, self.args)
+      db, t = thunk(db, self.options, self.args)
 
     if self.options.restrict:
-      if self.options.no_execute or self.options.verbose:
-        print >>stderr, "t = t.restrict(" + self.options.restrict + ")"
-      if not self.options.no_execute:
+      if self.trace("t = t.restrict(" + self.options.restrict + ")"):
         lambda_fn = eval(self.options.restrict)
         t = t.restrict(lambda_fn)
 
     if self.options.project:
       project = self.options.project.split(',')
-      if self.options.no_execute or self.options.verbose:
-        print >>stderr, "t = t.project(" + str(project) + ")"
-      if not self.options.no_execute:
+      if self.trace("t = t.project(" + str(project) + ")"):
         t = t.project(project)
 
     if self.options.extend:
-      if self.options.no_execute or self.options.verbose:
-        print >>stderr, "t = t.extend([" + self.options.extend + ")"
-      if not self.options.no_execute:
+      if self.trace("t = t.extend([" + self.options.extend + ")"):
         lambda_fn = eval(self.options.extend)
         t = t.extend(lambda_fn)
 
     if self.options.distinct:
-      if self.options.no_execute or self.options.verbose:
-        print >>stderr, "t = t.distinct()"
-      if not self.options.no_execute:
+      if self.trace("t = t.distinct()"):
         t = t.distinct()
 
     if self.options.summarize_per is not None:
@@ -1024,13 +1042,11 @@ class CLI(object):
         summarize_per = [] 
       else:
         summarize_per = self.options.summarize_per.split(",")
-      if self.options.no_execute or self.options.verbose:
         if self.options.summarize_add:
           astr = ", " + self.options.summarize_add
         else:
           astr = ""
-        print >>stderr, "t = t.summarize(" + str(summarize_per) + astr + ")"
-      if not self.options.no_execute:
+      if self.trace("t = t.summarize(" + str(summarize_per) + astr + ")"):
         if self.options.summarize_add:
           summarize_add = eval(self.options.summarize_add)
           t = t.summarize(summarize_per, summarize_add)
@@ -1039,90 +1055,42 @@ class CLI(object):
 
     if self.options.order_by:
       order_by = self.options.order_by.split(',')
-      if self.options.no_execute or self.options.verbose:
-        print >>stderr, "t = t.order_by(" + str(order_by) + ")"
-      if not self.options.no_execute:
+      if self.trace("t = t.order_by(" + str(order_by) + ")"):
         t = t.orderBy(order_by) 
 
     if self.options.limit:
-      if self.options.no_execute or self.options.verbose:
-        print >>stderr, "t = t.limit(" + self.options.limit + ")"
-      if not self.options.no_execute:
+      if self.trace("t = t.limit(" + self.options.limit + ")"):
         t = t.limit(int(self.options.limit)) 
 
     if self.options.count:
-      if self.options.no_execute or self.options.verbose:
-        print >>stderr, \
-            "t = Table({'columns':['count'], 'rows':[[len(t)]]})"
-      if not self.options.no_execute:
+      if self.trace("t = Table({'columns':['count'], 'rows':[[len(t)]]})"):
         t = Table({'columns':['count'], 'rows':[[len(t)]]})
 
-    if not self.options.no_execute:
-      if self.options.name and self.options.comment:
-        if self.options.combine:
-          d.name = self.options.name
-          d.comment = self.options.comment
-        else:
-          t = Table({"name": self.options.name,
-                     "comment" : self.options.comment,
-                     "columns" : t.columns(),
-                     "rows": t.rows()})
-      elif self.options.name:
-        if self.options.combine:
-          d.name = self.options.name
-        else:
-          t = Table({"name": self.options.name,
-                     "comment": t.comment(),
-                     "columns": t.columns(),
-                     "rows": t.rows()})
-      elif self.options.comment:
-        if self.options.combine:
-          d.comment = self.options.comment
-        else:
-          t = Table({"name": t.name(),
-                     "comment": self.options.comment,
-                     "columns": t.columns(),
-                     "rows": t.rows()})
+    if self.options.database or self.options.combine:
+      ostr = "db"
+      o = db
+    else:
+      ostr = "t"
+      o = t
 
-    if self.options.describe:
-      if self.options.no_execute or self.options.verbose:
-        if self.options.database:
-          print >>stderr, "d.describe()"
-        else:
-          print >>stderr, "t.describe()"
-      if not self.options.no_execute:
-        if self.options.database:
-          print >>stdout, d.describe(self.options.pretty)
-        else:
-          print >>stdout, t.describe(self.options.pretty)
-    elif self.options.combine:
-      if self.options.no_execute or self.options.verbose:
-        print >>stderr, "print d"
-      if not self.options.no_execute:
-        print >>stdout, d._dumps(True, self.options.pretty)
-      return
-    elif self.options.extract:
-      if self.options.no_execute or self.options.verbose:
-        print >>stderr, "print d." + self.options.extract
-      if not self.options.no_execute:
+    if self.options.name:
+      o.setName(self.options.name)
+    if self.options.comment:
+      o.setName(self.options.comment)
+
+    if self.options.extract:
+      if self.trace("print d[" + self.options.extract + "]"):
         print >>stdout, d[self.options.extract]._dumps(True, 
             self.options.pretty)
     elif self.options.csv:
-      if self.options.no_execute or self.options.verbose:
-        print >>stderr, "TableToCSV(stdout)"
-      if not self.options.no_execute:
+      if self.trace("TableToCSV(stdout)"):
         TableToCSV(stdout, t, self.options.null)
+    elif self.options.describe:
+       if self.trace(ostr + ".describe()"):
+         print >>stdout, o.describe(self.options.pretty)
     else:
-      if self.options.no_execute or self.options.verbose:
-        if self.options.database:
-          print >>stderr, "print d"
-        else:
-          print >>stderr, "print t"
-      if not self.options.no_execute:
-        if self.options.database:
-          print >>stdout, d._dumps(True, self.options.pretty) 
-        else:
-         print >>stdout, t._dumps(True, self.options.pretty) 
+      if self.trace("print " + ostr):
+          print >>self.output, o._dumps(True, self.options.pretty) 
 
 #
 # PRIVATE HELPER FUNCTIONS
@@ -1141,13 +1109,39 @@ def _merge_rows(srow, orow, other_idx):
 # MAIN
 #
 
-def Main(thunk = None, read_from_stdin=True, args=None,
-         stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr):
+def readStr(db, name, str):
+  d = json.loads(str)
+  t = None
+  if d['kind'] == 'database':
+    db = Database(d)
+  else:
+    t = Table(d)
+    if not t.name():
+      t.setName("stdin")
+    name = t.name()
+    db[name] = t
+  return db, t
+
+def query(db, options, params):
+  if len(params):
+    names = params[:]
+    while len(names):
+      name = names.pop(0)
+      f = open(name)
+      str = f.read()
+      db, t = readStr(db, name, str)
+  else:
+    str = sys.stdin.read()
+    db, t = readStr(db, '-', str)
+  return db, t
+
+def Main(thunk = query, args=None, stdin=sys.stdin, stdout=sys.stdout, 
+         stderr=sys.stderr):
   cli = CLI()
   parser = optparse.OptionParser("usage: json_db [options]") 
   cli.add_params(parser)
   cli.opt_parse(parser, args)
-  cli.run(thunk, read_from_stdin, stdin, stdout, stderr)
+  cli.run(thunk, stdin, stdout, stderr)
 
 if __name__ == '__main__':
-  Main()
+  Main() 
