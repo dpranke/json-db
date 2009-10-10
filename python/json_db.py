@@ -176,17 +176,21 @@ class Database(object):
     del self.__tables[name]
 
   def setName(self, name):
+    """Sets the database name."""
     self.__name = name
     return self
 
   def name(self):
+    """Returns the database name."""
     return self.__name
 
   def setComment(self, comment):
+    """Sets the database comment string."""
     self.__comment = comment
     return self
 
   def comment(self):
+    """Returns the database comment string."""
     return self.__comment
     
 class Table(object):
@@ -361,6 +365,10 @@ class Table(object):
     """Returns the name of the table, if it has one."""
     return self.__name
 
+  def setName(self, name):
+    """Sets the table name."""
+    self.__name = name
+
   def kind(self):
     """Returns the JSON-DB object type for the table ("table")."""
     return self.__kind
@@ -368,6 +376,10 @@ class Table(object):
   def comment(self):
     """Returns the comment describing the table, if it has one."""
     return self.__comment
+
+  def setComment(self, comment):
+    """Sets the comment string for the table."""
+    self.__comment = comment
 
   def columns(self):
     """Returns the list of columns in the Table."""
@@ -1117,7 +1129,7 @@ def readStr(db, name, str):
   else:
     t = Table(d)
     if not t.name():
-      t.setName("stdin")
+      t.setName(name)
     name = t.name()
     db[name] = t
   return db, t
@@ -1128,8 +1140,9 @@ def query(db, options, params):
     while len(names):
       name = names.pop(0)
       f = open(name)
+      basename = os.path.splitext(os.path.basename(name))[0]
       str = f.read()
-      db, t = readStr(db, name, str)
+      db, t = readStr(db, basename, str)
   else:
     str = sys.stdin.read()
     db, t = readStr(db, '-', str)
