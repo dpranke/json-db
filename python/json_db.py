@@ -126,10 +126,12 @@ class Database(object):
   def _dumps(self, include_data=True, pretty=False):
     """Returns a compact version of the database as a JSON string."""
     if pretty:
-      p = "\n "
+      p = "\n  "
+      start = " "
     else:
       p = " "
-    s =  '{'
+      start = ""
+    s =  '{' + start
     s += '"version": ' + str(self.__version) + ',' + p
     s += '"kind": "' + self.__kind + '",' + p
         
@@ -141,18 +143,19 @@ class Database(object):
     if pretty:
       s += p + "  "
     keys = self.__tables.keys()
+    keys.sort()
     for i in range(len(keys)):
       t = self.__tables[keys[i]]
-      indent = len(keys[i]) + 8 
+      indent = 6
       s +=  '"' + keys[i] + '": ' + t._dumps(include_data, pretty, indent)
       if i < len(keys)-1:
         s += ',' + p + "  "
     s += '}}'
     return s
 
-  def describe(self):
+  def describe(self, pretty=False):
     """Returns a JSON description of the database minus the rows."""
-    return self._dumps(False, False)
+    return self._dumps(False, pretty)
     
   def __eq__(self, other):
     """Databases are equal if they contain the same databases."""
@@ -299,16 +302,24 @@ class Table(object):
     """Returns a compact JSON representation of the Table."""
     return str(self)
 
-  def _dumps(self, include_data=True, pretty=False, indent=1):
+  def _dumps(self, include_data=True, pretty=False, indent=2):
     """Returns a pretty-printed version of the Table. If |include_data| is
     True, the contents of the Table are included; if not, just the metadata
     for the table is included."""
     
     if pretty:
       p = "\n" + " " * indent
+      if indent > 2:
+        start = p
+        end = "\n" + " " * (indent - 2)
+      else:
+        start = " "
+        end = ""
     else:
       p = " "
-    s = "{"
+      start = ""
+      end = "\n"
+    s = "{" + start
     s = s + '"kind": ' + json.dumps(self.__kind) + "," + p
     if self.__name:
       s = s + '"name": ' + json.dumps(self.__name) + "," + p
@@ -318,6 +329,8 @@ class Table(object):
     s = s + '"columns": ' + json.dumps(self.__columns) + "," + p
     if self.__primary_key:
       s = s + '"primary key": ' + json.dumps(self.__primary_key) + "," + p 
+    if pretty:
+      s = s + '"row_count": ' + str(len(self.__rows)) + ',' + p
     s = s + '"rows": ['
     if pretty:
       rowsep = ",\n" + " " * (indent + 9)
@@ -325,7 +338,7 @@ class Table(object):
       rowsep = ", "
     if include_data:
       s = s + rowsep.join([json.dumps(r) for r in self.__rows])
-    s = s + ']'
+    s = s + ']' + end 
     s = s + "}"
     return s;
 
@@ -360,9 +373,9 @@ class Table(object):
     """Returns the list of columns in the Table."""
     return self.__columns
 
-  def describe(self):
+  def describe(self, pretty_print=False):
     """Returns a JSON description minus the rows."""
-    return self._dumps(False)
+    return self._dumps(False, pretty_print)
 
   def row(self, id):
     """Returns the row containing the primary key, or, if id is a number,
@@ -1079,9 +1092,9 @@ class CLI(object):
           print >>stderr, "t.describe()"
       if not self.options.no_execute:
         if self.options.database:
-          print >>stdout, d.describe()
+          print >>stdout, d.describe(self.options.pretty)
         else:
-          print >>stdout, t.describe()
+          print >>stdout, t.describe(self.options.pretty)
     elif self.options.combine:
       if self.options.no_execute or self.options.verbose:
         print >>stderr, "print d"
@@ -1092,7 +1105,8 @@ class CLI(object):
       if self.options.no_execute or self.options.verbose:
         print >>stderr, "print d." + self.options.extract
       if not self.options.no_execute:
-        print >>stdout, d[self.options.extract]
+        print >>stdout, d[self.options.extract]._dumps(True, 
+            self.options.pretty)
     elif self.options.csv:
       if self.options.no_execute or self.options.verbose:
         print >>stderr, "TableToCSV(stdout)"
