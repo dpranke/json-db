@@ -1,3 +1,5 @@
+# ignore VIM swap files
+.*.swp
 # ignore python object files
 *.pyc
 .cover.*.py
