@@ -1079,7 +1079,7 @@ class CLI(object):
       if self.trace("t = Table({'columns':['count'], 'rows':[[len(t)]]})"):
         t = Table({'columns':['count'], 'rows':[[len(t)]]})
 
-    if self.options.database or self.options.combine:
+    if self.options.database or self.options.combine or t is None:
       ostr = "db"
       o = db
     else:
@@ -1092,8 +1092,8 @@ class CLI(object):
       o.setComment(self.options.comment)
 
     if self.options.extract:
-      if self.trace("print d[" + self.options.extract + "]"):
-        print >>stdout, d[self.options.extract]._dumps(True, 
+      if self.trace("print db[" + self.options.extract + "]"):
+        print >>stdout, db[self.options.extract]._dumps(True, 
             self.options.pretty)
     elif self.options.csv:
       if self.trace("TableToCSV(stdout)"):
