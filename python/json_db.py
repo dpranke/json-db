@@ -874,6 +874,7 @@ class CLI(object):
   def __init__(self):
     self.options = None
     self.args = None
+    self.db = None
     pass
 
   def add_params(self, parser):
@@ -957,15 +958,13 @@ class CLI(object):
         f = open(name)
         
     self.trace("d = Database(" + name + ")")
-    d = Database()
     if not self.options.no_execute:
-      d = Database(f)
-      if not d.name() and name != '-':
+      self.db = Database(f)
+      if not self.db.name() and name != '-':
         name = os.path.splitext(os.path.basename(name))[0]
-        d.setName(name)
+        self.db.setName(name)
       f.close()
-    return d
-
+  
   def trace(self, str):
     """Log the message to stderr and return whether or not to execute."""
     if self.options.no_execute or self.options.verbose:
@@ -1004,13 +1003,12 @@ class CLI(object):
     else:
       self.output = stdout
 
-    db = Database()
+    self.db = Database()
     if self.options.database:
       db_names = self.options.database[:]
       while len(db_names):
         db_name = db_names.pop(0)
-        db = self.readDB(db_name)
-    self.db = db
+        self.readDB(db_name)
    
     t = None
     if self.options.table:
@@ -1019,10 +1017,10 @@ class CLI(object):
         table_name = table_names.pop(0)
         t = self.readTable(table_name);
         if t:
-          db[t.name()] = t
+          self.db[t.name()] = t
 
     if thunk:
-      db, t = thunk(db, self.options, self.args)
+      t = thunk(self, self.options, self.args)
 
     if self.options.restrict:
       if self.trace("t = t.restrict(" + self.options.restrict + ")"):
@@ -1075,7 +1073,7 @@ class CLI(object):
 
     if self.options.combine or t is None:
       ostr = "db"
-      o = db
+      o = self.db
     else:
       ostr = "t"
       o = t
@@ -1116,20 +1114,20 @@ def _merge_rows(srow, orow, other_idx):
 # MAIN
 #
 
-def readStr(db, name, str):
+def readStr(cli, name, str):
   d = json.loads(str)
   t = None
   if d['kind'] == 'database':
-    db = Database(d)
+    cli.db = Database(d)
   else:
     t = Table(d)
     if not t.name():
       t.setName(name)
     name = t.name()
-    db[name] = t
-  return db, t
+    cli.db[name] = t
+  return t
 
-def query(db, options, params):
+def query(cli, options, params):
   if len(params):
     names = params[:]
     while len(names):
@@ -1137,11 +1135,12 @@ def query(db, options, params):
       f = open(name)
       basename = os.path.splitext(os.path.basename(name))[0]
       str = f.read()
-      db, t = readStr(db, basename, str)
+      t = readStr(cli, basename, str)
   else:
     str = sys.stdin.read()
-    db, t = readStr(db, '-', str)
-  return db, t
+    t = readStr(cli, '-', str)
+    
+  return t
 
 def Main(thunk = query, args=None, stdin=sys.stdin, stdout=sys.stdout, 
          stderr=sys.stderr):
