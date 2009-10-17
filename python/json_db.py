@@ -60,20 +60,7 @@ def TableToCSV(stream, t, nullvalue=None):
         w.writerow([nullstr(c) for c in r])
     except IOError:
       pass
- 
-class StringWriter(object):
-  """Simple class that provides a write() method that writes into a string."""
-
-  def __init__(newline='\r\n'):
-    self.lines = []
-    self.newline = newline
-
-  def write(s):
-    self.lines.append(s)
-
-  def __str__():
-    return self.newline.join(self.lines)
-    
+   
 class Database(object):
   """Implements a simple representation of a set of tables.
 
@@ -132,8 +119,8 @@ class Database(object):
       p = " "
       start = ""
     s =  '{' + start
-    s += '"version": ' + str(self.__version) + ',' + p
     s += '"kind": "' + self.__kind + '",' + p
+    s += '"version": ' + str(self.__version) + ',' + p
         
     if self.__name:
       s += '"name": "' + self.__name + '",' + p
