@@ -390,7 +390,9 @@ class Table(object):
 
   def rowByIndex(self, index):
     """Returns the nth row in the table."""
-    return Row(self.__columns, self.__rows[index])
+    if index >=0 and index < len(self.__rows):
+      return Row(self.__columns, self.__rows[index])
+    raise IndexError("unknown row index '%d'" % (index))
 
   def rowByKey(self, key):
     """Returns the row containing the primary key."""
@@ -881,8 +883,7 @@ class CLI(object):
     parser.add_option("-D", "--distinct", action="store_true", dest="distinct",
                       default=False, 
                       help="ensure output contains only distinct rows")
-    parser.add_option("-d", "--database", action="store", dest="database",
-                      default=False, 
+    parser.add_option("-d", "--database", action="append", dest="database",
                       help="open and read database.")
     parser.add_option("-C", "--input-csv", action="store_true", 
                       dest="input_csv", default=False, 
@@ -946,6 +947,7 @@ class CLI(object):
   def opt_parse(self, parser, args):
     """Parse the command line."""
     (self.options, self.args) = parser.parse_args(args)
+    return (self.options, self.args)
       
   def readDB(self, name):
     if name == "-":
@@ -955,12 +957,14 @@ class CLI(object):
         f = open(name)
         
     self.trace("d = Database(" + name + ")")
+    d = Database()
     if not self.options.no_execute:
       d = Database(f)
       if not d.name() and name != '-':
         name = os.path.splitext(os.path.basename(name))[0]
         d.setName(name)
       f.close()
+    return d
 
   def trace(self, str):
     """Log the message to stderr and return whether or not to execute."""
@@ -1002,7 +1006,10 @@ class CLI(object):
 
     db = Database()
     if self.options.database:
-      db = self.readDB()
+      db_names = self.options.database[:]
+      while len(db_names):
+        db_name = db_names.pop(0)
+        db = self.readDB(db_name)
     self.db = db
    
     t = None
@@ -1066,7 +1073,7 @@ class CLI(object):
       if self.trace("t = Table({'columns':['count'], 'rows':[[len(t)]]})"):
         t = Table({'columns':['count'], 'rows':[[len(t)]]})
 
-    if self.options.database or self.options.combine or t is None:
+    if self.options.combine or t is None:
       ostr = "db"
       o = db
     else:

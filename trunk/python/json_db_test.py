@@ -256,6 +256,12 @@ class TableTests(unittest.TestCase):
 
   def testRowByIndex(self):
     self.assertEqual(tableOne().rowByIndex(1), Row({"a": 3, "b": 4}))
+    row = None
+    try:
+      self.assertEqual(tableOne().rowByIndex(-1), Row({"a": 3, "b": 4}))
+    except IndexError:
+      pass
+    self.assertEqual(row, None)
 
   def testRowByKey(self):
     self.assertEqual(tableOne().rowByKey('1'), Row({"a": 1, "b": 2}))
