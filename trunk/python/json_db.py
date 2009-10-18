@@ -55,7 +55,7 @@ def TableToCSV(stream, t, nullvalue=None):
 
     try:
       w = csv.writer(stream)
-      w.writerow(t.columns())
+      w.writerow(t.columns)
       for r in t:
         w.writerow([nullstr(c) for c in r])
     except IOError:
@@ -254,9 +254,9 @@ class Table(object):
                          (str(obj['columns'])))
       self.__columns = obj['columns']
     else:
-      if len(self.__rows) == 0 or len(self.__rows[0]) == 0:
+      if len(obj['rows']) == 0 or len(obj['rows']) == 0:
         raise ValueError
-      self.__columns = [ "c" + str(i) for i in xrange(len(self.__rows[0]))]
+      self.__columns = [ "c" + str(i) for i in xrange(len(obj['rows'][0]))]
 
     for r in obj['rows']:
       if (type(r) != types.ListType and type(r) != types.TupleType):
@@ -292,13 +292,13 @@ class Table(object):
       i += 1
 
     # TODO(dpranke): implement multi-column keys, support for multiple indices 
-    self.indices = {}
+    self.__indices = {}
     if self.__key:
       key = self.__key
-      self.indices[key] = {}
+      self.__indices[key] = {}
       idx = self.__column_indices[key]
       for r in self.__rows:
-        self.indices[key][r[idx]] = r 
+        self.__indices[key][r[idx]] = r 
 
   #
   # PUBLIC PROPERTIES
@@ -339,9 +339,9 @@ class Table(object):
     return self.intersect(other)
 
   def __contains__(self, key):
-    # TODO(dpranke): implement for tables w/o keys
-    if self.key:
-      return self.indices[self.key].has_key()
+    if self.__key:
+      return self.has_key(key)
+    return k in self.__rows
       
   def __eq__(self, other):
     if not isinstance(other, Table):
@@ -355,7 +355,7 @@ class Table(object):
     return False
 
   def __getitem__(self, item):
-    return Row(self.__columns, self.indices[self.key][item])
+    return Row(self.__columns, self.__indices[self.key][item])
 
   def __hash__(self):
     """Returns a hashed value of the Table."""
@@ -364,17 +364,22 @@ class Table(object):
 
   def __iter__(self):
     class _TableIter(object):
-      def __init__(self, table):
-        self.__table = table
+      def __init__(self, columns, rows):
+        self.__rows =  rows
+        self.__columns = columns
         self.__index = 0
 
-    def next(self):
-      if self.__index == len(self.__table):
-        raise StopIteration
-      else:
-        self.__index = self.__index + 1
-      return self.__table.__rows[self.__index] 
-    return _TableIter(self)      
+      def __iter__(self):
+        return self
+
+      def next(self):
+        if self.__index == len(self.__rows):
+          raise StopIteration
+        else:
+          r = Row(self.__columns, self.__rows[self.__index])
+          self.__index = self.__index + 1
+        return r
+    return _TableIter(self.__columns, self.__rows)      
 
   def __len__(self):
     return len(self.__rows)
@@ -409,6 +414,8 @@ class Table(object):
   def __xor__(self, other):
     return self.minus(other).union(other.minus(self))
 
+  def has_key(self, k):
+      return self.__key and self.__indices[self.__key].has_key(k)
   #
   # SET METHODS
   #
@@ -423,7 +430,7 @@ class Table(object):
         rows.append(r)
     d = { "columns": self.__columns,
           "rows": rows,
-          "primary key": self.__primary_key }
+          "primary key": self.__key }
     return Table(d)
 
   def intersection(self, other):
@@ -439,7 +446,7 @@ class Table(object):
         rows.append(r)
     d = { "columns": self.__columns,
           "rows": rows,
-          "primary key": self.__primary_key }
+          "primary key": self.__key }
     return Table(d)
 
   def issubset(self, other):
@@ -481,8 +488,10 @@ class Table(object):
       if idx >= 0:
         if not self.has_key(r[idx]):
           rows.append(r)
-        elif self[key] != r:
-          raise ValueError('duplicate key "%s" in union' % (key))
+        elif self[r[idx]].values() != r:
+          raise ValueError('duplicate key "%s" in union' % (r[idx]))
+      elif not r in self.__rows:
+        rows.append(r)
 
     d = { "columns": self.columns,
           "rows": rows,
@@ -505,10 +514,10 @@ class Table(object):
       ext_row = fn(row)
       if not ext_col_names:
         ext_col_names = ext_row.columns()[:]
-      new_rows.append(new_row + ext_row.values())
+      new_rows.append(new_row + tuple(ext_row.values()))
     d = { "columns" : self.__columns + ext_col_names,
           "rows" : new_rows,
-          "primary key" : self.__primary_key }
+          "primary key" : self.__key }
     return Table(d)
 
   def rename(self, d):
@@ -524,22 +533,22 @@ class Table(object):
       else:
         new_columns.append(c)
     nd = { "rows" : self.__rows , "columns" : new_columns} 
-    if self.__primary_key:
-      lpk = self.__primary_key.lower()
+    if self.__key:
+      lk = self.__key.lower()
       try:
-        idx = new_column_names.keys().index(lpk)
-        new_primary_key = new_column_names[lpk]
+        idx = new_column_names.keys().index(lk)
+        new_key = new_column_names[lk]
       except ValueError:
-        new_primary_key = self.__primary_key
-      nd["primary key"] = new_primary_key
+        new_key = self.__key
+      nd["key"] = new_key
     return Table(nd)
 
   def restrict(self, fn):
     """Returns a new Table restricted to rows that fn(row) returns True for."""
     new_rows = [x for x in self.__rows if fn(Row(self.__columns, x))]
     d = { "rows" : new_rows, "columns" : self.__columns }
-    if self.__primary_key:
-      d["primary key"] = self.__primary_key
+    if self.__key:
+      d["key"] = self.__key
     return Table(d)
 
   def project(self, columns):
@@ -557,9 +566,8 @@ class Table(object):
       new_rows.append(new_row)
     d = { "rows" : new_rows, "columns" : new_columns }
     try:
-      if self.__primary_key and \
-          lower_columns.index(self.__primary_key.lower()) >= 0:
-        d["primary key"] = self.__primary_key
+      if self.__key and lower_columns.index(self.__key.lower()) >= 0:
+        d["key"] = self.__key
     except ValueError:
       pass
     return Table(d)
@@ -650,7 +658,7 @@ class Table(object):
     add_column_names = None
     for key, values in agg.iteritems():
       if add_fn:
-        add_row = add_fn(Row(self.columns(), values))
+        add_row = add_fn(Row(self.columns, values))
         if not add_column_names:
           add_column_names = add_row.columns()
         new_rows.append(list(key) + add_row.values())
@@ -731,17 +739,17 @@ class Table(object):
         raise ValueError
 
     # check to see if the join column is the PK
-    pk_join = (other.__primary_key and 
-               other_col.lower() == other.__primary_key.lower())
+    pk_join = (other.__key and 
+               other_col.lower() == other.__key.lower())
     self_idx = self.__column_indices[self_col.lower()]
     other_idx = other.__column_indices[other_col.lower()]
 
-    new_columns = _merge_rows(self.__columns, other.__columns, other_idx)
+    new_columns = list(_merge_rows(self.__columns, other.__columns, other_idx))
     new_rows = []
     for srow in self.__rows:
       if pk_join:
         try:
-          orow = other.rowAsList(srow[self_idx])[:]
+          orow = other[srow[self_idx]].values()[:]
           new_rows.append(_merge_rows(srow, orow, other_idx))
         except KeyError:
           if outer_join:
@@ -828,7 +836,7 @@ class Table(object):
           idx = -idx
         result = asc * cmp(a[idx-1], b[idx-1])
         if result == 0:
-          return fn_aux(a, b, indices[1:])
+          return cmp_helper(a, b, indices[1:])
         else:
           return result
 
@@ -1102,7 +1110,7 @@ class CLI(object):
     t = None
     if not self.options.no_execute:
       t = Table(f)
-      if not t.name() and name != '-':
+      if not t.name and name != '-':
         name = os.path.splitext(os.path.basename(name))[0]
         t.setName(name)
       f.close()
@@ -1135,7 +1143,7 @@ class CLI(object):
         table_name = table_names.pop(0)
         t = self.readTable(table_name);
         if t:
-          self.db[t.name()] = t
+          self.db[t.name] = t
 
     if thunk:
       t = thunk(self, self.options, self.args)
@@ -1179,7 +1187,7 @@ class CLI(object):
     if self.options.order_by:
       order_by = self.options.order_by.split(',')
       if self.trace("t = t.order_by(" + str(order_by) + ")"):
-        t = t.orderBy(order_by) 
+        t = t.sort(order_by) 
 
     if self.options.limit:
       if self.trace("t = t.limit(" + self.options.limit + ")"):
@@ -1221,12 +1229,12 @@ class CLI(object):
 
 def _merge_rows(srow, orow, other_idx):
   """Merge two lists, leaving out orow[other_idx]."""
-  result = srow[:]
+  result = list(srow)
   for i in range(len(orow)):
     if i == other_idx:
       continue
     result.append(orow[i])
-  return result
+  return tuple(result)
 
 #
 # MAIN
@@ -1239,9 +1247,9 @@ def readStr(cli, name, str):
     cli.db = Database(d)
   else:
     t = Table(d)
-    if not t.name():
-      t.setName(name)
-    name = t.name()
+    if not t.name:
+      t.name = name
+    name = t.name
     cli.db[name] = t
   return t
 
