@@ -22,7 +22,7 @@ import sys
 def tableOne():
   return Table({"rows": [[1, 2], [3, 4]], 
                 "columns": ["a", "b"], 
-                "primary key":"a"})
+                "key":"a"})
 
 def tableTwo():
   return Table({"rows": [[1, 2], [3, 4]]})
@@ -30,7 +30,7 @@ def tableTwo():
 def tableEmp():
   return Table({"name": "emp", "columns":["empno", "dept"], 
                 "rows":[[1, 1],[2, 2],[3, 3]],
-                "primary key": "empno"})
+                "key": "empno"})
 
 def tableThree():
   return Table({"columns": ["a", "b"], 
@@ -50,14 +50,14 @@ def tableSix():
 
 def jsonOne():
   return ('{"kind": "table", "version": 1, "columns": ["a", "b"], '
-          '"primary key": "a", "rows": [[1, 2], [3, 4]]}')
+          '"key": "a", "rows": [[1, 2], [3, 4]]}')
 
 def jsonTwo():
   return ('{"kind": "table", "version": 1, "columns": ["c0", "c1"], '
           '"rows": [[1, 2], [3, 4]]}')
 
 def jsonEmp():
-  return ('{"primary key": "empno", "rows": [[1], [2], [3]], '
+  return ('{"key": "empno", "rows": [[1], [2], [3]], '
           '"version": 1, "columns": ["empno"], "name": "emp"}')
  
 class MockStream(object):
@@ -114,15 +114,15 @@ class DatabaseTests(unittest.TestCase):
     self.assertEqual(db, 
         Database('{"kind":"database","version":1,"tables":{}}'))
     db = Database('{"tables":{"a": {"columns": ["a", "b"], '
-                  '"rows": [[1, 2], [3, 4]], "primary key": "a"}}}')
+                  '"rows": [[1, 2], [3, 4]], "key": "a"}}}')
     self.assertEqual(db['a'], tableOne())
     self.assertEqual(str(db), '{"kind": "database", "version": 1, '
         '"tables": {"a": {"kind": "table", "version": 1, '
-        '"columns": ["a", "b"], "primary key": "a", '
+        '"columns": ["a", "b"], "key": "a", '
         '"rows": [[1, 2], [3, 4]]}}}')
     self.assertEqual(repr(db), '{"kind": "database", "version": 1, '
         '"tables": {"a": {"kind": "table", "version": 1, '
-        '"columns": ["a", "b"], "primary key": "a", '
+        '"columns": ["a", "b"], "key": "a", '
         '"rows": [[1, 2], [3, 4]]}}}')
 
   def testNameAndComment(self):
@@ -174,7 +174,7 @@ class TableTests(unittest.TestCase):
   """Do some basic testing for json_db."""
             
   def testConstructors(self):
-    self.assertEqual(str(tableOne()), """{"kind": "table", "version": 1, "columns": ["a", "b"], "primary key": "a", "rows": [[1, 2], [3, 4]]}""")
+    self.assertEqual(str(tableOne()), """{"kind": "table", "version": 1, "columns": ["a", "b"], "key": "a", "rows": [[1, 2], [3, 4]]}""")
     self.assertEqual(repr(Table({"rows": [[1, 2], [3, 4]]})), jsonTwo())
     self.assertEqual(Table({"rows": [[1,2],[3,4]], "version": 1}),
                      Table({"rows": [[1,2],[3,4]]}))
@@ -189,7 +189,7 @@ class TableTests(unittest.TestCase):
 
     t = None
     try:
-      t = Table({"rows": [1, 2], "columns": ["a", "b"], "primary key": "c"})
+      t = Table({"rows": [1, 2], "columns": ["a", "b"], "key": "c"})
     except ValueError:
       pass
     self.assertEqual(t, None)
@@ -269,18 +269,18 @@ class TableTests(unittest.TestCase):
 
   def testRename(self):
     self.assertEqual(tableOne().rename({"a":"c0", "b": "c1"}),
-                     Table({"primary key": "c0",
+                     Table({"key": "c0",
                             "rows": [[1, 2], [3, 4]], 
                             "columns":["c0", "c1"]}))
     self.assertEqual(tableOne().rename({"b":"c1"}),
-                     Table({"primary key": "a",
+                     Table({"key": "a",
                             "rows": [[1, 2], [3, 4]], 
                             "columns":["a", "c1"]}))
 
 
   def testProject(self):
     self.assertEqual(tableOne().project(["a"]),
-                     Table({"primary key": "a", 
+                     Table({"key": "a", 
                             "rows": [[1], [3]], 
                             "columns": ["a"]})) 
     self.assertEqual(tableOne().project(["b"]),
@@ -289,14 +289,14 @@ class TableTests(unittest.TestCase):
                      
   def testRestrict(self):
     self.assertEqual(tableOne().restrict( lambda x : x.a == 1 ),
-                     Table({"primary key": "a", 
+                     Table({"key": "a", 
                             "rows": [[1, 2]], 
                             "columns": ["a", "b"]}))
 
   def testUpdate(self):
     def fn(r):
-      r.b = int(r.a) * 3
-      return r
+      b = int(r.a) * 3
+      return Row(["a, b"], [r.a, b])
 
     self.assertEqual(tableOne().update(fn), 
                      Table({"columns": ["a", "b"],
@@ -311,8 +311,6 @@ class TableTests(unittest.TestCase):
 
   def test__GetItem__(self):
     self.assertEqual(tableOne()[1], Row({"a": 1, "b": 2}))
-    self.assertEqual(tableOne()['1'], Row({"a": 1, "b": 2}))
-    self.assertEqual(tableOne()[0], Row({"a": 1, "b": 2}))
 
   def testOrderBy(self):
     t1 = Table({"columns":["a", "b"],
@@ -342,18 +340,18 @@ class TableTests(unittest.TestCase):
 
   def testJoin(self):
     t1 = Table({"columns":["a","b"], "rows":[[1, 2], [3, 4]],
-                "primary key":"b"})
+                "key":"b"})
     t2 = Table({"columns":["b","c"], "rows":[[2, 1], [4, 3]],
-                "primary key":"b"})
+                "key":"b"})
     t3 = Table({"columns":["a","B"], "rows":[[1, 2], [3, 4]],
-                "primary key":"b"})
+                "key":"b"})
     t4 = Table({"columns":["b","c"], "rows":[[2, 1], [2, 2], [3, 1], [4, 1]]})
     t5 = Table({"columns":["b","c"], "rows":[[2, 2]], 
-                "primary key":"b"})
+                "key":"b"})
     t6 = Table({"columns":["b","c"], "rows":[[1, 2]], 
-                "primary key":"b"})
+                "key":"b"})
     t7 = Table({"columns":["d","c"], "rows":[[2, 1], [4, 3]],
-                "primary key":"d"})
+                "key":"d"})
 
     j = t1.join(t2)
     self.assertEqual(j, Table({"columns": ["a","b","c"],
@@ -385,9 +383,9 @@ class TableTests(unittest.TestCase):
 
   def testBadJoin(self):
     t1 = Table({"columns":["a","b"], "rows":[[1, 2], [3, 4]],
-                "primary key":"b"})
+                "key":"b"})
     t2 = Table({"columns":["c","d"], "rows":[[2, 1], [4, 3]],
-                "primary key":"c"})
+                "key":"c"})
  
     t = None
     try:
@@ -418,22 +416,22 @@ class TableTests(unittest.TestCase):
 
     t = tableEmp().union(Table({"name": "emp", 
        "columns":["empno", "dept"], "rows": [[1,1],[5,5]], 
-       "primary key": "empno"}))
+       "key": "empno"}))
     self.assertEqual(t, Table({"name": "emp", 
        "columns":["empno", "dept"], "rows": [[1,1],[2,2],[3,3],[5,5]], 
-       "primary key": "empno"}))
+       "key": "empno"}))
     
     t = None
     msg = ""
     try:
       t = tableEmp().union(Table({"name": "emp", 
        "columns":["empno", "dept"], "rows": [[1,3],[5,5]], 
-       "primary key": "empno"}))
+       "key": "empno"}))
     except ValueError, e:
       msg = str(e)
       pass
     self.assertEqual(t, None)
-    self.assertEqual(msg, "duplicate primary key \"1\" in union")
+    self.assertEqual(msg, "duplicate key \"1\" in union")
 
   def testIntersect(self):
     self.assertEqual(tableFive().intersect(tableThree()),
