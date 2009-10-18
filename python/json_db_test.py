@@ -16,6 +16,7 @@
 
 from json_db import *
 
+import pdb
 import unittest
 import sys
 
@@ -236,36 +237,12 @@ class TableTests(unittest.TestCase):
     self.assertEqual(s, "1,2\n3,4\n")
 
   def testName(self):
-    self.assertEqual(tableOne().name(), None)
-    self.assertEqual(tableEmp().name(), "emp")
+    self.assertEqual(tableOne().name, None)
+    self.assertEqual(tableEmp().name, "emp")
 
   def testColumns(self):
-    self.assertEqual(tableOne().columns(), ["a","b"])
-    self.assertEqual(tableTwo().columns(), ["c0", "c1"])
-
-  def testRowAsList(self):
-    self.assertEqual(tableOne().rowAsList('1'), [1,2])
-
-  def testRows(self):
-    self.assertEqual(tableOne().rows(), 
-                     [[1, 2],[3, 4]])
-
-  def testRow(self):
-    self.assertEqual(tableOne().row('1'), Row({"a": 1, "b": 2})) 
-    self.assertEqual(tableOne().row(1), Row({"a": 1, "b": 2})) 
-
-  def testRowByIndex(self):
-    self.assertEqual(tableOne().rowByIndex(1), Row({"a": 3, "b": 4}))
-    row = None
-    try:
-      self.assertEqual(tableOne().rowByIndex(-1), Row({"a": 3, "b": 4}))
-    except IndexError:
-      pass
-    self.assertEqual(row, None)
-
-  def testRowByKey(self):
-    self.assertEqual(tableOne().rowByKey('1'), Row({"a": 1, "b": 2}))
-    self.assertEqual(tableOne().rowByKey(1), Row({"a": 1, "b": 2}))
+    self.assertEqual(tableOne().columns, ["a","b"])
+    self.assertEqual(tableTwo().columns, ["c0", "c1"])
 
   def testRename(self):
     self.assertEqual(tableOne().rename({"a":"c0", "b": "c1"}),
@@ -312,7 +289,7 @@ class TableTests(unittest.TestCase):
   def test__GetItem__(self):
     self.assertEqual(tableOne()[1], Row({"a": 1, "b": 2}))
 
-  def testOrderBy(self):
+  def testSort(self):
     t1 = Table({"columns":["a", "b"],
                 "rows":[["a", 1],
                         ["a", 3],
@@ -320,7 +297,7 @@ class TableTests(unittest.TestCase):
                         ["b", 3],
                         ["b", 1],
                         ["b", 2]]})
-    self.assertEqual(t1.orderBy(["a", "b"]),
+    self.assertEqual(t1.sort(["a", "b"]),
                      Table({"columns": ["a", "b"],
                             "rows":   [["a", 1],
                                        ["a", 2],
@@ -328,7 +305,7 @@ class TableTests(unittest.TestCase):
                                        ["b", 1],
                                        ["b", 2],
                                        ["b", 3]]}))
-    self.assertEqual(t1.orderBy(["-b", "a"]),
+    self.assertEqual(t1.sort(["-b", "a"]),
                      Table({"columns": ["a", "b"],
                             "rows":   [["a", 3],
                                        ["b", 3],
@@ -433,12 +410,12 @@ class TableTests(unittest.TestCase):
     self.assertEqual(t, None)
     self.assertEqual(msg, "duplicate key \"1\" in union")
 
-  def testIntersect(self):
-    self.assertEqual(tableFive().intersect(tableThree()),
+  def testIntersection(self):
+    self.assertEqual(tableFive().intersection(tableThree()),
                      tableThree())
 
-  def testMinus(self):
-    self.assertEqual(tableFive().minus(tableThree()),
+  def testDifference(self):
+    self.assertEqual(tableFive().difference(tableThree()),
                      tableSix())
  
   def testSummarize(self):
