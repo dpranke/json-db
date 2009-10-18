@@ -183,13 +183,12 @@ class Database(object):
 class Table(object):
   """Implements a simple relational table API.
 
-  A table is defined as a list of named columns and a list of rows that
-  can be accessed by a unique primary key (which must be one of the named
-  columns). Tables can also be iterated over.
+  A table is defined as a list of named columns and a list of rows, where
+  each row is a tuple. Tables may be iterated over, where the iterator 
+  returns Row objects.
   
-  Each row is returned as a Row object.
-  
-  Tables are immutable."""
+  The data in tables is immutable, but tables may have their metadata 
+  (name, comment, indices) changed."""
 
   def __init__(self, obj):
     """Initialize the Table from the given input. There are several possible
@@ -199,7 +198,7 @@ class Table(object):
         representation (described below). This is the most efficient form.
       * obj can be a string containing the JSON represention.
       * obj can be a file handle whose contents are a JSON representation
-        of a table
+        of a table. 
     
     Tables are represented as JSON dictionaries containing at least one 
     field called 'rows' that has as its value a list of lists, where each 
@@ -221,11 +220,17 @@ class Table(object):
     If the dictionary contains a field called "comment", that field is 
     used as a descriptive comment for the Table.
 
-    If the dictionary contains a field called "primary key", that field
-    must have one of the column names as its value. If that field is specified,
-    then rows can be retrieved using the [] method on the Table, otherwise
-    rows can only be retrieved using a zero-based offset or by a filter 
-    operation."""
+    If the dictionary contains a field called "key", then that field must 
+    be either a string identifying a column name, or a list of column names.
+    If that field is present, then each row must have a unique value for the 
+    given key. A given row can then be accessed using the [] operator on the
+    table.
+
+    If the diction contains a field called "keys", then that field must
+    be a list of keys where each is as above. Note that if more than one
+    key is present in the list, then only the first key is used as the index
+    for the [] operator, but any key can be specified using the byKey() 
+    method."""
     
     if type(obj) == types.StringType or type(obj) == types.UnicodeType:
       return self.__init__(json.loads(obj))
@@ -234,17 +239,15 @@ class Table(object):
     elif type(obj) != types.DictType:
       raise ValueError
 
-    self.__columns = []          # list of column names (case preserved)
-    self.__column_indices = {}   # map of lowercase column names to indices
-    self.__rows = []             # list of lists of row values 
-    self.__keys = {}             # map of primary keys to row indices
-    self.__primary_key = None    # column name of the pkey (case preserved) 
-    self.__pk_column_index = -1  # column number of the pkey in every row
-    self.__version = CURRENT_TABLE_VERSION
-    self.__name = None
-    self.__comment = None
-    self.__rows = obj['rows']
+    self.__kind = 'table'
+    if obj.has_key('kind') and obj['kind'] != 'table':
+        raise ValueError("object kind %s isn't a table" % (str(obj['kind'])))
 
+    self.__rows = []             # list of lists of row values 
+    if not obj.has_key('rows'):
+      raise ValueError("object contains no 'rows' key.")
+
+    self.__columns = []          # list of column names (case preserved)
     if obj.has_key('columns'):
       if type(obj['columns']) != types.ListType:
         raise ValueError("object column value %s isn't a list" % 
@@ -255,92 +258,95 @@ class Table(object):
         raise ValueError
       self.__columns = [ "c" + str(i) for i in xrange(len(self.__rows[0]))]
 
-    for i in range(len(self.__columns)):
-      self.__column_indices[self.__columns[i].lower()] = i
-
-    # verify that # of columns matches # of columns in each row
-    for r in self.__rows:
-      if type(r) != types.ListType or len(r) != len(self.__columns):
+    for r in obj['rows']:
+      if (type(r) != types.ListType and type(r) != types.TupleType):
+        raise ValueError("row %s is not a list or a tuple" % (str(r)))
+      if len(r) != len(self.__columns):
         raise ValueError("no. of columns in row differs from header (%s,%s)" %
                          (str(self.__columns), str(r)))
+      else:
+        self.__rows.append(tuple(r))
 
-    if obj.has_key('primary key') and obj['primary key'] is not None:
-      self.__primary_key = obj['primary key']
-      self.__pk_column_index = self.__column_indices[self.__primary_key.lower()]
-      i = 0
-      for r in self.__rows:
-        self.__keys[str(r[self.__pk_column_index])] = i
-        i = i + 1
+    self.__key = None            # column name of the pkey (case preserved) 
+    if obj.has_key('key') and obj['key'] is not None:
+      self.__key = obj['key']
 
+    self.__name = None
     if obj.has_key('name'):
       self.__name = obj['name']
+
+    self.__comment = None
     if obj.has_key('comment'):
       self.__comment = obj['comment']
+
+    self.__version = CURRENT_TABLE_VERSION
     if obj.has_key('version'):
       self.__version = obj['version']
-    if obj.has_key('kind') and obj['kind'] != 'table':
-        raise ValueError("object kind %s isn't a table" % (str(obj['kind'])))
-    self.__kind = 'table' 
 
-  def __getitem__(self, id):
-    return self.row(id)
+    # now build internal data structures
 
-  def __str__(self):
-    """Returns a compact JSON version of the Table."""
-    return self._dumps(True)
+    self.__column_indices = {}   # map of lowercase column names to indices
+    i = 0
+    for c in self.__columns:
+      self.__column_indices[c.lower()] = i
+      i += 1
 
-  def __repr__(self):
-    """Returns a compact JSON representation of the Table."""
-    return str(self)
+    # TODO(dpranke): implement multi-column keys, support for multiple indices 
+    self.indices = {}
+    if self.__key:
+      key = self.__key
+      self.indices[key] = {}
+      idx = self.__column_indices[key]
+      for r in self.__rows:
+        self.indices[key][r[idx]] = r 
 
-  def _dumps(self, include_data=True, pretty=False, indent=2):
-    """Returns a pretty-printed version of the Table. If |include_data| is
-    True, the contents of the Table are included; if not, just the metadata
-    for the table is included."""
-    
-    if pretty:
-      p = "\n" + " " * indent
-      if indent > 2:
-        start = p
-        end = "\n" + " " * (indent - 2)
-      else:
-        start = " "
-        end = ""
-    else:
-      p = " "
-      start = ""
-      end = ""
-    s = "{" + start
-    s = s + '"kind": ' + json.dumps(self.__kind) + "," + p
-    if self.__name:
-      s = s + '"name": ' + json.dumps(self.__name) + "," + p
-    if self.__comment:
-      s = s + '"comment": ' + json.dumps(self.__comment) + "," + p
-    s = s + '"version": ' + json.dumps(self.__version) + "," + p
-    s = s + '"columns": ' + json.dumps(self.__columns) + "," + p
-    if self.__primary_key:
-      s = s + '"primary key": ' + json.dumps(self.__primary_key) + "," + p 
-    if pretty:
-      s = s + '"row_count": ' + str(len(self.__rows)) + ',' + p
-    s = s + '"rows": ['
-    if pretty:
-      rowsep = ",\n" + " " * (indent + 9)
-    else:
-      rowsep = ", "
-    if include_data:
-      s = s + rowsep.join([json.dumps(r) for r in self.__rows])
-    s = s + ']' + end 
-    s = s + "}"
-    return s;
+  #
+  # PUBLIC PROPERTIES
+  # 
 
-  def __len__(self):
-    return len(self.__rows)
+  # read-write properties
+  def _setComment(self, comment):
+    self.__comment = comment
 
-  def __iter__(self):
-    return _TableIter(self)      
+  comment = property(lambda self: self.__comment, _setComment,
+                     doc='descriptive comment for the table')
 
+
+  def _setName(self, name):
+    self.__name = name
+
+  name = property(lambda self: self.__name, _setName, 
+                  doc='name of the table')
+
+  # read-only
+  key = property(lambda self: self.__key,
+                 doc='primary key for the Table, if any')
+  kind = property(lambda self: self.__kind,
+                  doc='type of json_db object')
+  version = property(lambda self: self.__version,
+                     doc='json_db version of the object')
+  columns = property(lambda self: self.__columns,
+                     doc='column names for the table')
+
+  #
+  # BUILT-IN METHODS
+  #
+  # Tables support all of the built-in methods for immutable mappings
+  # and sets.
+  #
+
+  def __and__(self, other):
+    return self.intersect(other)
+
+  def __contains__(self, key):
+    # TODO(dpranke): implement for tables w/o keys
+    if self.key:
+      return self.indices[self.key].has_key()
+      
   def __eq__(self, other):
-    if (isinstance(other, Table) and self.__columns == other.__columns and 
+    if not isinstance(other, Table):
+      return False
+    if (self.__columns == other.__columns and 
         len(self.__rows) == len(other.__rows)):
       for r in self.__rows:
         if not r in other.__rows:
@@ -348,59 +354,162 @@ class Table(object):
       return True
     return False
 
-  def name(self):
-    """Returns the name of the table, if it has one."""
-    return self.__name
+  def __getitem__(self, item):
+    return Row(self.__columns, self.indices[self.key][item])
 
-  def setName(self, name):
-    """Sets the table name."""
-    self.__name = name
+  def __hash__(self):
+    """Returns a hashed value of the Table."""
+    # TODO(dpranke) - implement this
+    raise NotImplementedError("hash() not implemented")
 
-  def kind(self):
-    """Returns the JSON-DB object type for the table ("table")."""
-    return self.__kind
+  def __iter__(self):
+    class _TableIter(object):
+      def __init__(self, table):
+        self.__table = table
+        self.__index = 0
 
-  def comment(self):
-    """Returns the comment describing the table, if it has one."""
-    return self.__comment
+    def next(self):
+      if self.__index == len(self.__table):
+        raise StopIteration
+      else:
+        self.__index = self.__index + 1
+      return self.__table.__rows[self.__index] 
+    return _TableIter(self)      
 
-  def setComment(self, comment):
-    """Sets the comment string for the table."""
-    self.__comment = comment
+  def __len__(self):
+    return len(self.__rows)
 
-  def columns(self):
-    """Returns the list of columns in the Table."""
-    return self.__columns
+  def __nonzero(self):
+    """Tables are True if they contain rows."""
+    return len(self.__rows) > 0
 
-  def describe(self, pretty_print=False):
-    """Returns a JSON description minus the rows."""
-    return self._dumps(False, pretty_print)
+  def __or__(self, other):
+    return self.union(other)
 
-  def row(self, id):
-    """Returns the row containing the primary key, or, if id is a number,
-    the id'th row in the table."""
-    if type(id) == types.IntType and not self.__keys.has_key(str(id)):
-      return self.rowByIndex(id)
-    else:
-      return self.rowByKey(id)
+  def __rand__(self, other):
+    return other & self
 
-  def rows(self):
-    """Returns all of the rows in the table as a list of lists."""
-    return self.__rows
+  def __repr__(self):
+    """Returns a compact JSON representation of the Table."""
+    return self._dumps(True)
 
-  def rowByIndex(self, index):
-    """Returns the nth row in the table."""
-    if index >=0 and index < len(self.__rows):
-      return Row(self.__columns, self.__rows[index])
-    raise IndexError("unknown row index '%d'" % (index))
+  def __ror__(self, other):
+    return other | self
 
-  def rowByKey(self, key):
-    """Returns the row containing the primary key."""
-    return Row(self.__columns, self.__rows[self.__keys[str(key)]])
+  def __rsub__(self, other):
+    return other - self
 
-  def rowAsList(self, id):
-    """Returns the specified row as a list (not a Row)."""
-    return self.row(id).values()
+  def __str__(self):
+    """Returns a compact JSON version of the Table."""
+    return self._dumps(True)
+
+  def __sub__(self, other):
+    return self.minus(other)
+
+  def __xor__(self, other):
+    return self.minus(other).union(other.minus(self))
+
+  #
+  # SET METHODS
+  #
+  def difference(self, other):
+    """Returns the rows in self that are not in other. The tables must have the
+    same column names and data types."""
+    if not isinstance(other, Table) or self.__columns != other.__columns:
+      return ValueError
+    rows = []
+    for r in self.__rows:
+      if not r in other.__rows:
+        rows.append(r)
+    d = { "columns": self.__columns,
+          "rows": rows,
+          "primary key": self.__primary_key }
+    return Table(d)
+
+  def intersection(self, other):
+    """Returns the intersection of the two tables. The tables must have the
+    same column names and data types."""
+    if not isinstance(other, Table):
+      return TypeError('other is not a Table')
+    if self.columns != other.columns:
+      return ValueError('other does not have the same columns')
+    rows = []
+    for r in self.__rows:
+      if r in other.__rows:
+        rows.append(r)
+    d = { "columns": self.__columns,
+          "rows": rows,
+          "primary key": self.__primary_key }
+    return Table(d)
+
+  def issubset(self, other):
+    """Returns True if all of the rows in self are also in other, False
+    otherwise. If self and other do not have the same columns, ValueError
+    is raised."""
+    if not isinstance(other, Table):
+      return TypeError('other is not a Table')
+    if self.columns != other.columns:
+      return ValueError('other does not have the same columns')
+    for r in self.__rows:
+      if not r in other.__rows:
+        return False
+    return True
+
+  def issuperset(self, other):
+    """Returns True if all of the rows in other are also in self, False
+    otherwise. If self and other do not have the same columns, a ValueError
+    is raised."""
+    return other.issubset(self)
+
+  def symmetric_difference(self, other):
+    """Returns the rows that are in one table or the other but not both."""
+    return self.difference(other).union(other.difference(self))
+
+  def union(self, other):
+    """Returns the union of the two tables. The tables must have the
+    same column names and data types."""
+    if not isinstance(other, Table):
+      return TypeError
+    if self.__columns != other.__columns:
+      return ValueError("columns don't match")
+    rows = []
+    rows.extend(self.__rows)
+    idx = -1
+    if self.__key:
+      idx = self.__column_indices[self.__key.lower()]
+    for r in other.__rows:
+      if idx >= 0:
+        if not self.has_key(r[idx]):
+          rows.append(r)
+        elif self[key] != r:
+          raise ValueError('duplicate key "%s" in union' % (key))
+
+    d = { "columns": self.columns,
+          "rows": rows,
+          "key": self.key }
+    return Table(d)
+
+
+  #
+  # RELATIONAL METHODS
+  #
+
+  def extend(self, fn):
+    """Returns a new table with new column name(s) and value(s) contained
+    in the Row returnd from fn."""
+    ext_col_names = None
+    new_rows = []
+    for r in self.__rows:
+      row = Row(self.__columns, r)
+      new_row = r[:]
+      ext_row = fn(row)
+      if not ext_col_names:
+        ext_col_names = ext_row.columns()[:]
+      new_rows.append(new_row + ext_row.values())
+    d = { "columns" : self.__columns + ext_col_names,
+          "rows" : new_rows,
+          "primary key" : self.__primary_key }
+    return Table(d)
 
   def rename(self, d):
     """Returns a new Table with the columns renamed."""
@@ -454,9 +563,134 @@ class Table(object):
     except ValueError:
       pass
     return Table(d)
+   
+  def inner_join(self, other, self_col=None, other_col=None):
+    """Performs a (natural, inner, or left) join on the two tables.
+    This is the same as self.join(other, False, self_col, other_col)."""
+    return self.join(other, False, self_col, other_col)
+      
+  def outer_join(self, other, self_col=None, other_col=None):
+    """Performs an outer (or left) join on the two tables. Same as
+    self.join(other, False, self_col, other_col)."""
+    return self.join(other, True, self_col, other_col)
+    
+  def summarize(self, per_column_names, add_fn=None):
+    """Returns a new table summarized over the list of columns in 
+    |per_column_names|, extended to any new columns returned by |add_fn|. 
+    |add_fn| is a function that takes a Row as input and returns a Row
+    as output - the output Row containing just the new columns to add.
+
+    If |add_fn| is none, we summarize and extend with a single column called
+    "count" that has as a value the # of times each row appeared.
+    
+    Examples:
+    
+      >>> t = Table({"columns": ["a", "b", "c", "d"],
+                     "rows":   [[1, 2, 3, 4],
+                                [1, 3, 3, 5],
+                                [1, 2, 4, 5]]})
+      >>> t.summarize(["a", "b"])
+      Table({"columns": ["a", "b", "count"],
+             "rows" :  [[1, 2, 2],
+                        [1, 3, 1]]})
+
+      >>> t.summarize(["a", "b"],
+      ...     lambda row : Row({"max_c": max(row.c), "min_d" :  min(row.d)}))
+      Table({"columns": ["a", "b", "max_c", "min_d"],
+             "rows":   [[1, 2, 4, 4],
+                        [1, 3, 3, 5]]})
+    """
+
+    def sum(l):
+      r = 0
+      for el in l:
+        r += x
+      return r
+
+    per_columns = [c.strip() for c in per_column_names]
+    per_lower_columns = [c.lower() for c in per_columns]
+
+    mask = []
+    for c in self.__columns:
+      mask.append(c.lower() in per_lower_columns)
+
+    # first, summarize into the agg dictionary
+    agg = {}
+    for r in self.__rows:
+      i = 0
+      per_values = []
+      while i < len(per_lower_columns):
+        per_values.append(r[self.__column_indices[per_lower_columns[i]]])
+        i = i + 1
+      per_key = tuple(per_values)
+      if agg.has_key(per_key):
+        if add_fn:
+          i = 0
+          while i < len(r):
+            if not mask[i]:
+              agg[per_key][i].append(r[i])
+            i = i + 1
+        else:
+          agg[per_key] = agg[per_key] + 1
+      else:
+        if add_fn:
+          agg[per_key] = []
+          i = 0
+          while i < len(r):
+            if mask[i]:
+              agg[per_key].append(r[i])
+            else:
+              agg[per_key].append([r[i]])
+            i = i + 1
+        else:
+          agg[per_key] = 1
+
+    # now, compute the new aggregates
+    new_rows = []
+    add_column_names = None
+    for key, values in agg.iteritems():
+      if add_fn:
+        add_row = add_fn(Row(self.columns(), values))
+        if not add_column_names:
+          add_column_names = add_row.columns()
+        new_rows.append(list(key) + add_row.values())
+      else:
+        if not add_column_names:
+          add_column_names = ["count"]
+        new_rows.append(list(key) + [values])
+
+    return Table({"columns": per_columns + add_column_names, 
+                  "rows": new_rows})
+   
+  def update(self, fn):
+    """Returns a new table with |fn| applied to each row."""
+    new_rows = []
+    for r in self.__rows:
+      row = Row(self.__columns, r)
+      ext_row = fn(row)
+      new_rows.append(ext_row.values())
+    d = { "columns": self.__columns,
+          "rows": new_rows,
+          "key": self.__key }
+    return Table(d)
+
+ 
+  #
+  # Useful extensions
+  #
 
   def join(self, other, outer_join=False, self_col=None, other_col=None):
     """Joins two tables and returns the result.
+
+    This is equivalent to:
+      t = tmpname(); 
+      t1 = self.rename(self_col, t);
+      t2 = other.rename(other_col, t);
+      if outer_join:
+        t3 = t1.inner_join(t2)
+      else:
+        t3 = t1.outer_join(t2)
+      return t3.rename(t, self_col)
 
     At the moment we only support equality joins on a single column. If
     the two tables have a column with the same name, then that column is
@@ -532,206 +766,58 @@ class Table(object):
 
     # XXX: preserve PK if possible
     return Table(d)
-    
-  def inner_join(self, other, self_col=None, other_col=None):
-    """Performs an inner (or left) join on the two tables. Same as
-    self.join(other, False, self_col, other_col)."""
-    return self.join(other, False, self_col, other_col)
-      
-  def outer_join(self, other, self_col=None, other_col=None):
-    """Performs an outer (or left) join on the two tables. Same as
-    self.join(other, False, self_col, other_col)."""
-    return self.join(other, True, self_col, other_col)
-    
-  def union(self, other):
-    """Returns the union of the two tables. The tables must have the
-    same column names and data types."""
-    if not isinstance(other, Table) or self.__columns != other.__columns:
-      return ValueError
-    rows = []
-    rows.extend(self.__rows)
-    for r in other.__rows:
-      if self.__primary_key:
-        key = str(r[self.__pk_column_index])
-        if not self.__keys.has_key(key):
-          rows.append(r)
-        elif self.__rows[self.__keys[key]] != r:
-          raise ValueError('duplicate primary key "%s" in union' % (key))
-      elif not r in rows:
-        rows.append(r)
-    d = { "columns": self.__columns,
-          "rows": rows,
-          "primary key": self.__primary_key }
-    return Table(d)
 
-  def intersect(self, other):
-    """Returns the intersection of the two tables. The tables must have the
-    same column names and data types."""
-    if not isinstance(other, Table) or self.__columns != other.__columns:
-      return ValueError
-    rows = []
-    for r in self.__rows:
-      if r in other.__rows:
-        rows.append(r)
-    d = { "columns": self.__columns,
-          "rows": rows,
-          "primary key": self.__primary_key }
-    return Table(d)
+  def describe(self, pretty_print=False):
+    """Returns a JSON description minus the rows."""
+    return self._dumps(False, pretty_print)
 
-  def minus(self, other):
-    """Returns the rows in self that are not in other. The tables must have the
-    same column names and data types."""
-    if not isinstance(other, Table) or self.__columns != other.__columns:
-      return ValueError
-    rows = []
-    for r in self.__rows:
-      if not r in other.__rows:
-        rows.append(r)
-    d = { "columns": self.__columns,
-          "rows": rows,
-          "primary key": self.__primary_key }
-    return Table(d)
+  def limit(self, n):
+    """Returns a new Table containg only the first n rows of self."""
+    return Table({"name": self.__name, 
+                  "columns": self.__columns,
+                  "key": self.__key,
+                  "rows": self.__rows[0:n]})
+
+
+  def toRow(self):
+    """If the Table contains a single row, this method returns the
+    Table as a Row object. If the table contains zero rows or more than 
+    one row, a ValueError is raised."""
+    if len(self.__rows) == 1:
+      return Row(self.__columns, self._rows[0])
+    if not len(self.__rows) == 0:
+      raise ValueError("Table contains no rows.")
+    raise ValueError("Table contais multiple rows.") 
+
+  def toScalar(self):
+    """If the Table contains a single row and a single column, then
+    the value of the element in that row is returned, else a ValueError is
+    raised."""
+    r = self.toRow()
+    if len(r) == 1:
+      return r.__values[0]
+    raise ValueError("Table contains multiple columns.")
 
   def distinct(self):
     """Returns a new table with all duplicate rows removed."""
-    new_rows = []
-    for r in self.__rows:
-      if not r in new_rows:
-        new_rows.append(r)
-    d = { "columns": self.__columns,
-          "rows": new_rows,
-          "primary key": self.__primary_key }
+
+    # if the Table has one or more keys, it can't have any duplicates.
+    if self.__key:
+      return self.copy()
+    else:
+      new_rows = []
+      for r in self.__rows:
+        if not r in new_rows:
+          new_rows.append(r)
+      d = { "columns": self.__columns,
+            "rows": new_rows }
     return Table(d)
 
-  def update(self, fn):
-    """Returns a new table with |fn| applied to each row."""
-    new_rows = []
-    for r in self.__rows:
-      row = Row(self.__columns, r)
-      ext_row = fn(row)
-      new_rows.append(row.values())
-    d = { "columns": self.__columns,
-          "rows": new_rows,
-          "primary key": self.__primary_key }
-    return Table(d)
-
-  def extend(self, fn):
-    """Returns a new table with new column name(s) and value(s) contained
-    in the Row returnd from fn."""
-    ext_col_names = None
-    new_rows = []
-    for r in self.__rows:
-      row = Row(self.__columns, r)
-      new_row = r[:]
-      ext_row = fn(row)
-      if not ext_col_names:
-        ext_col_names = ext_row.columns()[:]
-      new_rows.append(new_row + ext_row.values())
-    d = { "columns" : self.__columns + ext_col_names,
-          "rows" : new_rows,
-          "primary key" : self.__primary_key }
-    return Table(d)
-
-  def summarize(self, per_column_names, add_fn=None):
-    """Returns a new table summarized over the list of columns in 
-    |per_column_names|, extended to any new columns returned by |add_fn|. 
-    |add_fn| is a function that takes a Row as input and returns a Row
-    as output - the output Row containing just the new columns to add.
-
-    If |add_fn| is none, we summarize and extend with a single column called
-    "count" that has as a value the # of times each row appeared.
-    
-    Examples:
-    
-      t = Table({"columns": ["a", "b", "c", "d"],
-                 "rows":   [[1, 2, 3, 4],
-                            [1, 3, 3, 5],
-                            [1, 2, 4, 5]]})
-      t = t.summarize(["a", "b"])
-      //t == Table({"columns": ["a", "b", "count"],
-                    "rows" :  [[1, 2, 2],
-                               [1, 3, 1]]})
-
-      t = t.summarize(["a", "b"],
-        lambda row : Row({"max_c": max(row.c), "min_d" :  min(row.d)}))
-      //t == Table({"columns": ["a", "b", "max_c", "min_d"],
-      //            "rows":   [[1, 2, 4, 4],
-      //                       [1, 3, 3, 5]]})
-    """
-
-    def sum(l):
-      r = 0
-      for el in l:
-        r += x
-      return r
-
-    per_columns = [c.strip() for c in per_column_names]
-    per_lower_columns = [c.lower() for c in per_columns]
-
-    mask = []
-    for c in self.__columns:
-      mask.append(c.lower() in per_lower_columns)
-
-    # first, summarize into the agg dictionary
-    agg = {}
-    for r in self.__rows:
-      i = 0
-      per_values = []
-      while i < len(per_lower_columns):
-        per_values.append(r[self.__column_indices[per_lower_columns[i]]])
-        i = i + 1
-      per_key = tuple(per_values)
-      if agg.has_key(per_key):
-        if add_fn:
-          i = 0
-          while i < len(r):
-            if not mask[i]:
-              agg[per_key][i].append(r[i])
-            i = i + 1
-        else:
-          agg[per_key] = agg[per_key] + 1
-      else:
-        if add_fn:
-          agg[per_key] = []
-          i = 0
-          while i < len(r):
-            if mask[i]:
-              agg[per_key].append(r[i])
-            else:
-              agg[per_key].append([r[i]])
-            i = i + 1
-        else:
-          agg[per_key] = 1
-
-    # now, compute the new aggregates
-    new_rows = []
-    add_column_names = None
-    for key, values in agg.iteritems():
-      if add_fn:
-        add_row = add_fn(Row(self.columns(), values))
-        if not add_column_names:
-          add_column_names = add_row.columns()
-        new_rows.append(list(key) + add_row.values())
-      else:
-        if not add_column_names:
-          add_column_names = ["count"]
-        new_rows.append(list(key) + [values])
-
-    return Table({"columns": per_columns + add_column_names, 
-                  "rows": new_rows})
- 
-  def orderBy(self, columns):
+  def sort(self, columns=None):
     """Returns a copy of the table ordered by the list of columns as
-    specified."""
-    r = Table({"columns": self.__columns, "rows":self.__rows})
-    colindices = []
-    for c in [c.strip().lower() for c in columns]:
-      if c[0] == "-":
-        colindices.append(-1 * (r.__column_indices[c[1:]]+1))
-      else:
-        colindices.append(r.__column_indices[c]+1)
-
-    def fn_aux(a, b, indices):
+    specified. If no columns are specified, the primary key is used.
+    If the table has no primary key, a ValueError is raised."""
+    def cmp_helper(a, b, indices):
       if len(indices) == 0:
         return 0
       else:
@@ -746,33 +832,65 @@ class Table(object):
         else:
           return result
 
-    def fn(a, b):
-      return fn_aux(a, b, colindices)
+    def cmp_fn(a, b):
+      return cmp_helper(a, b, colindices)
 
-    r.__rows.sort(fn)
+    r = Table({"columns": self.__columns, "rows":self.__rows})
+    colindices = []
+    for c in [c.strip().lower() for c in columns]:
+      if c[0] == "-":
+        colindices.append(-1 * (r.__column_indices[c[1:]]+1))
+      else:
+        colindices.append(r.__column_indices[c]+1)
+
+    r.__rows.sort(cmp_fn)
     return r
 
+  #
+  # INTERNAL METHODS
+  #
 
-  def limit(self, n):
-    """Returns a new Table containg only the first n rows of self."""
-    return Table({"name": self.name(), 
-                 "columns": self.columns(), 
-                 "rows": self.rows()[0:n]})
-
-class _TableIter(object):
-  __table = None
-  __index = 0
-  def __init__(self, table):
-    self.__table = table
-    self.__index = 0
-
-  def next(self):
-    if self.__index == len(self.__table):
-      raise StopIteration
+  def _dumps(self, include_data=True, pretty=False, indent=2):
+    """Returns a pretty-printed version of the Table. If |include_data| is
+    True, the contents of the Table are included; if not, just the metadata
+    for the table is included."""
+    
+    if pretty:
+      p = "\n" + " " * indent
+      if indent > 2:
+        start = p
+        end = "\n" + " " * (indent - 2)
+      else:
+        start = " "
+        end = ""
     else:
-      self.__index = self.__index + 1
-    return self.__table.rowByIndex(self.__index - 1) 
+      p = " "
+      start = ""
+      end = ""
+    s = "{" + start
+    s = s + '"kind": ' + json.dumps(self.__kind) + "," + p
+    if self.__name:
+      s = s + '"name": ' + json.dumps(self.__name) + "," + p
+    if self.__comment:
+      s = s + '"comment": ' + json.dumps(self.__comment) + "," + p
+    s = s + '"version": ' + json.dumps(self.__version) + "," + p
+    s = s + '"columns": ' + json.dumps(self.__columns) + "," + p
+    if self.__key:
+      s = s + '"key": ' + json.dumps(self.__key) + "," + p 
+    if pretty:
+      s = s + '"row_count": ' + str(len(self.__rows)) + ',' + p
+    s = s + '"rows": ['
+    if pretty:
+      rowsep = ",\n" + " " * (indent + 9)
+    else:
+      rowsep = ", "
+    if include_data:
+      s = s + rowsep.join([json.dumps(r) for r in self.__rows])
+    s = s + ']' + end 
+    s = s + "}"
+    return s;
 
+ 
 class Row(object):
   """Implements a simple relational Row concept. A Row is basically an
   immutable dictionary where the keys are case-insensitive. A Row may be 
