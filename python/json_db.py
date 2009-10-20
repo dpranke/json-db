@@ -162,23 +162,20 @@ class Database(object):
   def __delitem__(self, name):
     del self.__tables[name]
 
-  def setName(self, name):
-    """Sets the database name."""
-    self.__name = name
-    return self
-
-  def name(self):
-    """Returns the database name."""
-    return self.__name
-
-  def setComment(self, comment):
-    """Sets the database comment string."""
+  # read-write properties
+  def _setComment(self, comment):
     self.__comment = comment
-    return self
 
-  def comment(self):
-    """Returns the database comment string."""
-    return self.__comment
+  comment = property(lambda self: self.__comment, _setComment,
+                     doc='descriptive comment for the database.')
+
+
+  def _setName(self, name):
+    self.__name = name
+
+  name = property(lambda self: self.__name, _setName, 
+                  doc='name of the database.')
+
     
 class Table(object):
   """Implements a simple relational table API.
@@ -1112,7 +1109,7 @@ class CLI(object):
       t = Table(f)
       if not t.name and name != '-':
         name = os.path.splitext(os.path.basename(name))[0]
-        t.setName(name)
+        t.name = name
       f.close()
     return t
 
@@ -1205,9 +1202,9 @@ class CLI(object):
       o = t
 
     if self.options.name:
-      o.setName(self.options.name)
+      o.name = self.options.name
     if self.options.comment:
-      o.setComment(self.options.comment)
+      o.comment = self.options.comment
 
     if self.options.extract:
       if self.trace("print db[" + self.options.extract + "]"):
