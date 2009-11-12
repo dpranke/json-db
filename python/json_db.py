@@ -19,9 +19,16 @@ import optparse
 import os
 import pdb
 import re
-import simplejson as json
 import sys
 import types
+
+try:
+  import json
+except ImportError, e:
+  try:
+    import simplejson as json
+  except ImportError:
+    from django.utils import simplejson as json
 
 CURRENT_TABLE_VERSION = 1
 CURRENT_DATABASE_VERSION = 1
@@ -119,13 +126,13 @@ class Database(object):
       p = " "
       start = ""
     s =  '{' + start
-    s += '"kind": "' + self.__kind + '",' + p
-    s += '"version": ' + str(self.__version) + ',' + p
+    s += '"kind": ' + json.dumps(self.__kind) + ',' + p
+    s += '"version": ' + json.dumps(self.__version) + ',' + p
         
     if self.__name:
-      s += '"name": "' + self.__name + '",' + p
+      s += '"name": ' + json.dumps(self.__name) + ',' + p
     if self.__comment:
-      s += '"comment": "' + self.__comment + '",' + p
+      s += '"comment": ' + json.dumps(self.__comment) + ',' + p
     s += '"tables": {'
     if pretty:
       s += p + "  "
@@ -663,6 +670,8 @@ class Table(object):
         if not add_column_names:
           add_column_names = ["count"]
         new_rows.append(list(key) + [values])
+    if add_column_names is None:
+      add_column_names = []
 
     return Table({"columns": per_columns + add_column_names, 
                   "rows": new_rows})
@@ -778,7 +787,7 @@ class Table(object):
 
   def limit(self, n):
     """Returns a new Table containg only the first n rows of self."""
-    return Table({"name": self.__name, 
+    return Table({"name": self.__name,
                   "columns": self.__columns,
                   "key": self.__key,
                   "rows": self.__rows[0:n]})
@@ -786,13 +795,13 @@ class Table(object):
 
   def toRow(self):
     """If the Table contains a single row, this method returns the
-    Table as a Row object. If the table contains zero rows or more than 
+    Table as a Row object. If the table contains zero rows or more than
     one row, a ValueError is raised."""
     if len(self.__rows) == 1:
-      return Row(self.__columns, self._rows[0])
+      return Row(self.__columns, self.__rows[0])
     if not len(self.__rows) == 0:
       raise ValueError("Table contains no rows.")
-    raise ValueError("Table contais multiple rows.") 
+    raise ValueError("Table contains multiple rows.")
 
   def toScalar(self):
     """If the Table contains a single row and a single column, then
@@ -800,7 +809,7 @@ class Table(object):
     raised."""
     r = self.toRow()
     if len(r) == 1:
-      return r.__values[0]
+      return r.values()[0]
     raise ValueError("Table contains multiple columns.")
 
   def distinct(self):
@@ -997,11 +1006,25 @@ class CLI(object):
   def __init__(self):
     self.options = None
     self.args = None
-    self.db = None
-    pass
+    self.db = Database()
+    self.stdout = sys.stdout
+    self.stderr = sys.stderr
+    self.stdin = sys.stdin
+
+  def add_basic_options(self, parser):
+    parser.add_option("", "--debug", action="store_true", dest="debug",
+                      default=False, help="start in the debugger")
+    parser.add_option("-n", "--no-execute", action="store_true", 
+                      dest="no_execute", default=False, 
+                      help="show commands but don't execute them")
+    parser.add_option("-v", "--verbose", action="store_true", 
+                      dest="verbose", default=False, 
+                      help="print commands along with executing them")
 
   def add_params(self, parser):
     """Adds common command line options to an optparser object."""
+    self.add_basic_options(parser)
+
     parser.add_option("-c", "--count", action="store_true", dest="count",
                       default=False, help="print # of rows in table")
     parser.add_option("-D", "--distinct", action="store_true", dest="distinct",
@@ -1021,9 +1044,6 @@ class CLI(object):
                       help="input file(s) are JSON")
     parser.add_option("-l", "--limit", action="store", dest="limit",
                       help="limit to the specified number of rows")
-    parser.add_option("-n", "--no-execute", action="store_true", 
-                      dest="no_execute", default=False, 
-                      help="show commands but don't execute them")
     parser.add_option("-o", "--output", action="store", dest="output",
                       help="output filename")
     parser.add_option("-O", "--order-by", action="store", dest="order_by",
@@ -1042,17 +1062,12 @@ class CLI(object):
                       help="function to add additional columns to the summary" )
     parser.add_option("-t", "--table", action="append",
                       dest="table", help="open and read table")
-    parser.add_option("-v", "--verbose", action="store_true", 
-                      dest="verbose", default=False, 
-                      help="print commands along with executing them")
     parser.add_option("", "--csv", action="store_true", dest="csv", 
                       default=False, help="output as CSV")
     parser.add_option("", "--combine", action="store_true", dest="combine",
                       default=False, help="combine tables into a database")
     parser.add_option("", "--comment", action="store", dest="comment",
                       default=False, help="add a comment to the table")
-    parser.add_option("", "--debug", action="store_true", dest="debug",
-                      default=False, help="start in the debugger")
     parser.add_option("", "--describe", action="store_true", dest="describe",
                       default=False, help="print the object definition")
     parser.add_option("", "--extract", action="store", dest="extract",
@@ -1126,7 +1141,6 @@ class CLI(object):
     else:
       self.output = stdout
 
-    self.db = Database()
     if self.options.database:
       db_names = self.options.database[:]
       while len(db_names):
@@ -1208,7 +1222,7 @@ class CLI(object):
 
     if self.options.extract:
       if self.trace("print db[" + self.options.extract + "]"):
-        print >>stdout, db[self.options.extract]._dumps(True, 
+        print >>stdout, o[self.options.extract]._dumps(True, 
             self.options.pretty)
     elif self.options.csv:
       if self.trace("TableToCSV(stdout)"):
