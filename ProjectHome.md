@@ -1,0 +1,1 @@
+This project implements a simple in-memory relational database system that uses JSON as an external data representation.
